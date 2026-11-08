@@ -1,5 +1,11 @@
 # CLAUDE.md
 
+> **Stale since the monorepo merge (NEU-2235).** This is an older copy of `.claude/CLAUDE.md`,
+> which is the current guide. The repo is now the `tvbf` monorepo (backend at the root, frontend
+> under `frontend/`), CI is `.github/workflows/ci.yml` on the shared workflows, and the ruff and
+> pyright scope lives in `pyproject.toml`. Where this file says otherwise, `.claude/CLAUDE.md` wins.
+> The docs PR (NEU-2259) folds the two together.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Repo layout
