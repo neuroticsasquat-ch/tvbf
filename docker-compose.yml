@@ -25,6 +25,11 @@ services:
       ADMIN_TOKEN: "${ADMIN_TOKEN:-dev-secret-change-me}"
       CORS_ALLOWED_ORIGINS: "${CORS_ALLOWED_ORIGINS:-https://app.tvbf.localhost}"
       COOKIE_DOMAIN: "${COOKIE_DOMAIN:-.tvbf.localhost}"
+      # The pyright wrapper fetches Node through nodeenv on first run in a new
+      # container. Asked for "latest", nodeenv dies parsing a `-alpha` entry in
+      # Node's release index (2026-11-08), so name a version. CI is unaffected:
+      # the runner already has node on PATH, which the wrapper prefers.
+      PYRIGHT_PYTHON_NODE_VERSION: "${PYRIGHT_PYTHON_NODE_VERSION:-22.12.0}"
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=proxy"
