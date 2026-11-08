@@ -491,6 +491,9 @@ tasks:
     cmds:
       - "{{.FE_EXEC}} pnpm run test:watch {{.CLI_ARGS}}"
 
+  # Exception (CONVENTIONS.md names this `build:app`): `fe:build` is the name the
+  # monorepo spec (ops, Decision 8) gives it. The rule exists so the bundle can't be
+  # confused with `build`, the image rebuild, and the fe: prefix already keeps them apart.
   fe:build:
     desc: Build the frontend for production (vite build, what Workers Builds runs)
     cmds:

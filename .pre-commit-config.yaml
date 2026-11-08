@@ -14,6 +14,8 @@ minimum_pre_commit_version: "3.5.0"
 # - fe-format checks only the staged files, because the frontend's main has known
 #   prettier drift that this hook must not force a whole-tree reformat over. CI
 #   doesn't run prettier at all.
+# - The fe-* hooks also match `css` beyond CONVENTIONS.md's frontend regex, because
+#   prettier formats the stylesheets (`pnpm run format` covers src/**/*.css).
 repos:
   - repo: local
     hooks:
