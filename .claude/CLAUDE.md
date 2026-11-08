@@ -4,38 +4,36 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repo layout
 
-This is the **backend** repo for **TV Binge Friend**, a web app for tracking TV watching with a
+This is the **`tvbf` monorepo** for **TV Binge Friend** — the backend at the root, the frontend
+under `frontend/` (NEU-2235, ops ADR-0008), and this file is the backend's guide. TV Binge Friend is a web app for tracking TV watching with a
 social layer (accepted/pending/blocked connections + friend-scoped show/episode activity). It is a
 FastAPI service: a TMDB catalog mirror (full pass + daily delta + airdate reconciliation), a browse
 API, and a user/tracking layer (signup/login with invite codes, sessions + CSRF, My Shows,
 episode/season/show watch tracking, Watch Next, Upcoming, recommendations).
 
-Its sibling is **[`tvbf-frontend`](https://github.com/neuroticsasquat-ch/tvbf-frontend)** — a React
-19 + Vite 6 + TypeScript + Tailwind v4 + shadcn/ui SPA, which carries its own `.claude/CLAUDE.md`.
-Both are cloned side by side under one parent directory, which sits beside `tbc-localdev-infra` (the path
-both Taskfiles include it from):
+The frontend is a React 19 + Vite + TypeScript + Tailwind v4 + shadcn/ui SPA, imported with its
+history from the archived `tvbf-frontend` repo. It still carries its own `frontend/.claude/CLAUDE.md`,
+`frontend/AGENTS.md` and `frontend/docs/` until the docs PR (NEU-2259) folds them into the root. The
+clone lives at `~/projects/tvbf`, beside `tbc-localdev-infra` (the path the Taskfile includes it
+from):
 
 ```
 <projects>/
   tbc-localdev-infra/
-  <parent>/
-    tvbf-backend/     <- you are here
-    tvbf-frontend/
+  tvbf/               <- you are here
+    frontend/
 ```
 
-Nothing outside this repo is required to work in it. There is no umbrella-level `CLAUDE.md` or
-`docs/` any more — everything relocated into the two repos on 2026-08-20 so a `git clone` is
-sufficient on a new machine.
+Nothing outside this repo is required to work in it. One compose file, one Taskfile (the frontend's
+targets are `fe:*`) and one pre-commit config cover both halves.
 
-**Doing frontend work from a backend-rooted session.** PyCharm holds both repos in one project with
-this one as the root, so a session started here loads this file and not the SPA's. If the task
-touches anything under `tvbf-frontend/`, **read `../tvbf-frontend/.claude/CLAUDE.md` in full before
-the first edit** — it is the same load-bearing prose this file is, not a summary, and the frontend's
-patterns are no more guessable from here than these are from there. It is a pointer rather than an
-`@` import on purpose: this file is already ~22k tokens and the SPA's is another ~6k, which every
-backend-only session would otherwise pay for nothing. Editing across the boundary also needs the
-directory added to the session — `permissions.additionalDirectories` in the gitignored
-`.claude/settings.local.json`, or `/add-dir ../tvbf-frontend` for a one-off.
+**Doing frontend work.** A session started here loads this file and not the SPA's. If the task
+touches anything under `frontend/`, **read `frontend/.claude/CLAUDE.md` in full before the first
+edit** — it is the same load-bearing prose this file is, not a summary, and the frontend's patterns
+are no more guessable from here than these are from there. It is a pointer rather than an `@`
+import on purpose: this file is already ~22k tokens and the SPA's is another ~6k, which every
+backend-only session would otherwise pay for nothing. Its `task <x>` commands are the root's
+`task fe:<x>` now.
 
 - `.claude/docs/` — the five split-out pattern files, listed under *Non-obvious patterns* below.
   Not optional reading; each says when you must read it.
@@ -47,7 +45,7 @@ directory added to the session — `permissions.additionalDirectories` in the gi
   NEU-1031's and it survived the relocation; what changed is that it is no longer a *contrast*
   with anywhere else, because there is no unversioned home left to contrast against. The three
   project specs (`tvbf-*-project-spec.md`) are here for the same reason: both repos cite them.
-  **Frontend-only specs live in `tvbf-frontend/docs/specs/`.** The split was made on each spec's
+  **Frontend-only specs live in `frontend/docs/specs/`** (until NEU-2259 moves them). The split was made on each spec's
   own `**Repo:**` header line.
 - `docs/plans/` — implementation plans, when a spec needs a separate one.
 - `docs/superpowers/{specs,plans}/` — the retired layout, kept as an archive. New docs go to the
@@ -57,7 +55,7 @@ directory added to the session — `permissions.additionalDirectories` in the gi
 
 **Specs written before 2026-08-20 say they "live in the umbrella `docs/`".** That directory is
 gone; read those sentences as "this repo's `docs/specs/`" (frontend-only ones, as
-`tvbf-frontend/docs/specs/`). The rationale each one gives — cross-repo citation or its absence —
+`frontend/docs/specs/`). The rationale each one gives — cross-repo citation or its absence —
 is still the rule; only the two homes it chose between were renamed. Left as written rather than
 rewritten across ~10 files, because the reasoning is the part worth keeping and editing it would
 restate a decision that was correct when made.
@@ -66,10 +64,11 @@ restate a decision that was correct when made.
 
 - `linear_initiative: TV BingeFriend`
 - `linear_team: Neuroticsasquatch`
-- `linear_repos: tvbf-backend, tvbf-frontend`
+- `linear_repos: tvbf`
 
 The `repo:<name>` label `loop.py` filters on is derived per repo from its own git remote basename,
-so it is `repo:tvbf-backend` here — the name above must match.
+so it is `repo:tvbf` here — the name above must match. `repo:tvbf-backend` and `repo:tvbf-frontend`
+stay on the tickets filed before the merge.
 
 **Catalog freshness.** The full TMDB catalog pass runs ~8.7 hours wall-clock. Locally, `catalog.show` may hold anywhere from a few thousand to the full ~229k rows depending on how far the most recent pass got. The browse API and tests work against whatever's present; the pass is resumable (`task ingest:catalog` picks up where it left off, keyed on `tmdb_synced_at`). Check `docker exec tbc_postgresql_db psql -U root -d tvbf -tAc "SELECT COUNT(*) FROM catalog.show"` for a quick freshness check. The `tvmaze` schema is gone (NEU-1051) — `catalog` is the only spine.
 
@@ -86,9 +85,9 @@ so it is `repo:tvbf-backend` here — the name above must match.
 All `task` commands run from this repo's root.
 
 Container lifecycle:
-- `task up` — start the shared infra, then the container; **does not rebuild**
-- `task down` / `task restart` / `task ps` — stop, restart, status
-- `task build` — rebuild the image and recreate the container; run it after any dependency or Dockerfile change
+- `task up` — start the shared infra, then the backend and frontend containers; **does not rebuild**
+- `task down` / `task restart` / `task ps` — stop both, restart the backend, status
+- `task build` — rebuild both images, sync the frontend's `node_modules` volume and recreate the containers; run it after any dependency or Dockerfile change
 - `task deps:add -- <pkg>` / `task deps:add-dev -- <pkg>` / `task deps:remove -- <pkg>` / `task deps:lock` — edit `pyproject.toml` and `uv.lock` (no install), then `task build`
 - `task logs` — follow (Ctrl+C to stop, container keeps running)
 - `task shell` — bash inside the container
@@ -104,10 +103,13 @@ Database:
 Quality gates:
 - `task test` — full pytest suite
 - `task test -- tests/test_browse_routes.py::test_name` — single test or file; `{{.CLI_ARGS}}` is forwarded verbatim
-- `task lint` — `ruff check src tests`
-- `task format` — `ruff format src tests` (in place)
-- `task format:check` — `ruff format --check src tests` (what pre-commit runs)
-- `task typecheck` — `pyright src tests`
+- `task lint` — `ruff check`
+- `task format` — `ruff format` (in place)
+- `task format:check` — `ruff format --check` (what pre-commit runs)
+- `task typecheck` — `pyright`
+- What those four cover (`src` and `tests`) is set in `pyproject.toml`, not on the command line, so CI's shared `python.yml`, which runs them bare, checks the same files (NEU-2235).
+- `task fe:lint` / `task fe:typecheck` / `task fe:test` / `task fe:build` — the frontend's four package scripts, in the `tvbf-frontend` container, the same ones CI's `js` job runs; plus `fe:format`, `fe:format:check`, `fe:worker-check` (`wrangler deploy --dry-run`), `fe:install` and `fe:deps:*`
+- **CI** is `.github/workflows/ci.yml`, a caller of the shared workflows (`neuroticsasquat-ch/workflows@v1`): a `changes` path filter, then `python` (Postgres 17; env from `.github/ci/env`, databases and schemas from `.github/ci/setup.sh`; ruff, pyright, `alembic heads`, `alembic upgrade head && alembic check`, pytest), `js` (`frontend/`) and `image` (the prod stage, which must not run as root). `ci` is the one required check. A frontend-only change skips `python` and `image`, a backend-only one skips `js`. `migrations/env.py`'s `MIGRATION_ONLY_INDEXES` is what keeps `alembic check` from reporting the trigram search indexes as removed.
 - `task coverage` — pytest with `--cov=src/tvbf --cov-report=term-missing --cov-report=html`; HTML report lands in `htmlcov/` (volume-mounted out of the container)
 
 Admin operations (all protected by `Authorization: Bearer $ADMIN_TOKEN`):
@@ -517,7 +519,7 @@ The run **verifies itself by anti-join**, counting source rows with no archive r
 
 **The initial migration creates `tvmaze` even though NEU-1051 drops it.** `db:init` and CI stopped creating that schema, so on a fresh database every `schema='tvmaze'` table in the historical chain had nowhere to go and `8927c889e469` failed outright — the ticket's own third acceptance criterion. That migration therefore opens with an idempotent `CREATE SCHEMA IF NOT EXISTS tvmaze`: a virgin database creates the schema at the start of the chain and drops it at the end, and a database that already ran the migration is untouched. Editing a shipped migration is normally wrong; this is the exception, because the statement is a no-op everywhere it has already run.
 
-**Adding a schema means editing five hand-maintained lists.** (Removing one means editing the same five — NEU-1051 is the worked example.) `migrations/env.py`'s `include_name`, the `CREATE SCHEMA IF NOT EXISTS` line in `Taskfile.yml`'s `db:init`, the *"Create databases + schemas"* step in `.github/workflows/test.yml` (CI's mirror of `db:init` — it never runs the Taskfile), `tests/conftest.py` (the session-fixture drop/create, its teardown drop, and the `schemaname IN (...)` truncate query), and this file's DB-topology section. Miss one and the suite fails in a way that looks unrelated — and the CI one fails *late*, because `conftest.py` creates the schema for `tvbf_test` itself, so only the migrate step against `tvbf` notices. `scripts/refresh_db.sh` needs no edit — its FK snapshot is generic (see below) — but a new schema only enters a refresh once it's added to that script's `RESTORED_SCHEMAS` modes.
+**Adding a schema means editing five hand-maintained lists.** (Removing one means editing the same five — NEU-1051 is the worked example.) `migrations/env.py`'s `include_name`, the `CREATE SCHEMA IF NOT EXISTS` line in `Taskfile.yml`'s `db:init`, `.github/ci/setup.sh` (CI's mirror of `db:init` — it never runs the Taskfile), `tests/conftest.py` (the session-fixture drop/create, its teardown drop, and the `schemaname IN (...)` truncate query), and this file's DB-topology section. Miss one and the suite fails in a way that looks unrelated — and the CI one fails *late*, because `conftest.py` creates the schema for `tvbf_test` itself, so only the migrate step against `tvbf` notices. `scripts/refresh_db.sh` needs no edit — its FK snapshot is generic (see below) — but a new schema only enters a refresh once it's added to that script's `RESTORED_SCHEMAS` modes.
 
 **There is exactly one text fold and it runs in Postgres.** `src/tvbf/sql_fold.py` owns it — `folded(expr)` for a column or bind parameter, `folded_equal(session, a, b)` for two Python-side strings. It is not reimplementable in Python: `unicodedata` normalisation does not decompose ł, ø, đ or ħ, so a Python-side `unaccent` disagrees with the SQL one on precisely the titles the fold exists for. Browse search has always folded in SQL (the `ix_*_folded_trgm` expression indexes are built on this expression); NEU-1043's title matching compares titles that arrive as JSON in Python, and **binds them into the same expression** rather than growing a second definition. If you are about to write `unicodedata.normalize(...)` to compare two titles, use `folded_equal` instead.
 
@@ -555,4 +557,4 @@ new feature. `docs/superpowers/{specs,plans}/` holds the retired layout — an a
 
 ## Pre-commit hooks
 
-Configured in `.pre-commit-config.yaml`: `task lint`, `task format:check`, `task typecheck` and `task test:unit` (the unit suite only; CI runs everything), each of which execs into the `tvbf-backend` service. They run only when Python files or the dependency manifests change, and require the container to be running for commits to succeed. Install once (on the host) with `pipx install pre-commit && pre-commit install`. (The frontend repo has no pre-commit hooks; its gates run via `task lint` / `task typecheck` / `task test` and CI.)
+Configured in `.pre-commit-config.yaml`: `task lint`, `task format:check`, `task typecheck` and `task test:unit` (the unit suite only; CI runs everything), each of which execs into the `tvbf-backend` service. They run only when Python files or the dependency manifests outside `frontend/` change. The `fe-*` hooks (`task fe:lint`, `task fe:format:check` on the staged files, `task fe:typecheck`, `task fe:test`) run in the `tvbf-frontend` container, and only for files under `frontend/`. Either set requires its container to be running for commits to succeed. Install once (on the host) with `pipx install pre-commit && pre-commit install`.

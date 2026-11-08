@@ -1,5 +1,11 @@
 # CLAUDE.md
 
+> **Monorepo note (NEU-2235).** This frontend now lives under `frontend/` in the `tvbf` monorepo,
+> with the backend at the repo root. Its own compose file, Taskfile, pre-commit config and CI are
+> gone: run everything from the root, where each `task <x>` below is `task fe:<x>` (`task up` starts
+> both containers), and CI is the root's `.github/workflows/ci.yml` (`js` job). References to a
+> sibling `tvbf-backend` repo mean the repo root. The docs PR (NEU-2259) rewrites this file.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Repo layout
