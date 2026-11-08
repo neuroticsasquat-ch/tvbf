@@ -1,6 +1,9 @@
-# tvbf-backend
+# tvbf
 
-FastAPI service backing TV Binge Friend. Four subsystems today:
+The TV Binge Friend monorepo: the FastAPI backend at the root, and the React SPA under
+[`frontend/`](frontend/README.md) (NEU-2235). `task up` starts both; the frontend's tasks are `task fe:*`.
+
+The backend is a FastAPI service backing TV Binge Friend. Four subsystems today:
 
 - **TMDB ingestion** — mirrors the TMDB catalog (shows, seasons, episodes, networks, genres, alternative titles, credits) into the local `catalog` schema via a full pass, a daily delta and a credits backfill. The TV Maze ingest it replaced was retired in NEU-1050; the `tvmaze` schema still holds its data until NEU-1051 drops it.
 - **Browse API** — gated read endpoints over the mirrored catalog: search (name + AKA), filter, sort, paginate, detail.

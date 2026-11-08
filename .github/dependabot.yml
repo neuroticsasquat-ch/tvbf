@@ -1,58 +1,58 @@
 version: 2
 updates:
-  - package-ecosystem: github-actions
-    directory: /
-    schedule:
-      interval: weekly
-      day: saturday
-      time: "09:00"
-      timezone: America/New_York
-    target-branch: updates/dependencies
-    commit-message:
-      prefix: ci
-      include: scope
-    groups:
-      minor-and-patch:
-        update-types:
-          - minor
-          - patch
-
-  - package-ecosystem: terraform
-    directory: /infra
-    schedule:
-      interval: weekly
-      day: saturday
-      time: "09:00"
-      timezone: America/New_York
-    target-branch: updates/dependencies
-    commit-message:
-      prefix: chore
-      include: scope
-    groups:
-      minor-and-patch:
-        update-types:
-          - minor
-          - patch
-
   - package-ecosystem: uv
     directory: /
+    target-branch: updates/dependencies
     schedule:
       interval: weekly
       day: saturday
       time: "09:00"
       timezone: America/New_York
-    target-branch: updates/dependencies
     commit-message:
       prefix: build
       prefix-development: build
-      include: scope
-    groups:
-      minor-and-patch:
-        update-types:
-          - minor
-          - patch
     ignore:
       # Held below 2.1 until opentelemetry-instrumentation-sqlalchemy supports it (see
       # pyproject.toml); drop with the cap.
       - dependency-name: sqlalchemy
         versions: [">=2.1"]
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+
+  # The frontend (frontend/). The npm ecosystem reads pnpm-lock.yaml.
+  - package-ecosystem: npm
+    directory: /frontend
+    target-branch: updates/dependencies
+    schedule:
+      interval: weekly
+      day: saturday
+      time: "09:00"
+      timezone: America/New_York
+    commit-message:
+      prefix: build
+      prefix-development: build
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+        # oxlint minors regularly enable new rules by default; on its own PR a
+        # new lint finding can't hold up the rest of the group.
+        exclude-patterns:
+          - oxlint
+
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: updates/dependencies
+    schedule:
+      interval: weekly
+      day: saturday
+      time: "09:00"
+      timezone: America/New_York
+    commit-message:
+      prefix: ci
+    # The shared workflows float on @v1; bumping them is the workflows repo's job.
+    ignore:
+      - dependency-name: neuroticsasquat-ch/workflows
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]

@@ -1,0 +1,298 @@
+import { HttpResponse, http } from "msw";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { server } from "@/test/msw/server";
+import { env } from "@/env";
+import { ApiError, apiFetch, buildShowsQuery, isEmailNotVerified, setCsrfToken } from "./client";
+import type { ShowFilters } from "./types";
+
+describe("apiFetch", () => {
+  afterEach(() => server.resetHandlers());
+
+  it("returns parsed JSON on 2xx", async () => {
+    server.use(http.get(`${env.apiBaseUrl}/ping`, () => HttpResponse.json({ ok: true })));
+    const result = await apiFetch<{ ok: boolean }>("/ping");
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("throws ApiError on non-2xx with detail message", async () => {
+    server.use(
+      http.get(`${env.apiBaseUrl}/fail`, () =>
+        HttpResponse.json({ detail: "nope" }, { status: 404 }),
+      ),
+    );
+    await expect(apiFetch("/fail")).rejects.toMatchObject({
+      name: "ApiError",
+      status: 404,
+      message: "nope",
+    });
+  });
+
+  it("throws ApiError with generic message when body has no detail", async () => {
+    server.use(http.get(`${env.apiBaseUrl}/fail`, () => new HttpResponse(null, { status: 500 })));
+    await expect(apiFetch("/fail")).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe("isEmailNotVerified", () => {
+  afterEach(() => server.resetHandlers());
+
+  /** Errors are produced through `apiFetch` against a served body rather than
+   * constructed by hand, so the helper is asserted against the wire shape
+   * NEU-1161 §4 publishes. */
+  async function errorFrom(status: number, body: { detail: string }): Promise<unknown> {
+    server.use(http.post(`${env.apiBaseUrl}/gated`, () => HttpResponse.json(body, { status })));
+    return await apiFetch("/gated", { method: "POST" }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+  }
+
+  it("is true for a 403 carrying detail email_not_verified", async () => {
+    expect(isEmailNotVerified(await errorFrom(403, { detail: "email_not_verified" }))).toBe(true);
+  });
+
+  it("is false for the other 403 on the same route", async () => {
+    expect(isEmailNotVerified(await errorFrom(403, { detail: "csrf_invalid" }))).toBe(false);
+  });
+
+  it("is false for a 401, and for anything that is not an ApiError", async () => {
+    expect(isEmailNotVerified(await errorFrom(401, { detail: "auth_required" }))).toBe(false);
+    expect(isEmailNotVerified(new Error("email_not_verified"))).toBe(false);
+    expect(isEmailNotVerified(null)).toBe(false);
+  });
+});
+
+describe("buildShowsQuery", () => {
+  it("returns empty string when filters are empty", () => {
+    expect(buildShowsQuery({})).toBe("");
+  });
+
+  it("omits undefined and empty-array values", () => {
+    const filters: ShowFilters = {
+      search: "",
+      genre: [],
+      network: [],
+      page: 1,
+    };
+    expect(buildShowsQuery(filters)).toBe("page=1");
+  });
+
+  it("serializes scalars, repeats arrays, and keeps sort", () => {
+    const filters: ShowFilters = {
+      search: "the",
+      status: "Returning Series",
+      genre: ["Drama", "Comedy"],
+      network: [10, 11],
+      language: "English",
+      type: "Scripted",
+      sort: "-premiered",
+      page: 2,
+      per_page: 25,
+    };
+    const q = new URLSearchParams(buildShowsQuery(filters));
+    expect(q.get("search")).toBe("the");
+    expect(q.get("status")).toBe("Returning Series");
+    expect(q.getAll("genre")).toEqual(["Drama", "Comedy"]);
+    expect(q.getAll("network")).toEqual(["10", "11"]);
+    expect(q.get("language")).toBe("English");
+    expect(q.get("type")).toBe("Scripted");
+    expect(q.get("sort")).toBe("-premiered");
+    expect(q.get("page")).toBe("2");
+    expect(q.get("per_page")).toBe("25");
+  });
+});
+
+describe("apiFetch — auth + csrf", () => {
+  beforeEach(() => {
+    setCsrfToken(null);
+  });
+
+  it("includes credentials on every request", async () => {
+    // Asserted on the init handed to fetch, not on the handler's `request`:
+    // msw 3's Node interceptor rebuilds the Request without its credentials
+    // mode, so `request.credentials` reads "same-origin" whatever was sent.
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    server.use(http.get(`${env.apiBaseUrl}/probe`, () => HttpResponse.json({ ok: true })));
+    try {
+      await apiFetch("/probe");
+      expect(fetchSpy.mock.calls[0]?.[1]?.credentials).toBe("include");
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it("attaches X-CSRF-Token from in-memory csrf token on POST", async () => {
+    setCsrfToken("abc123");
+    let observedHeader: string | null = null;
+    server.use(
+      http.post(`${env.apiBaseUrl}/echo`, ({ request }) => {
+        observedHeader = request.headers.get("X-CSRF-Token");
+        return HttpResponse.json({});
+      }),
+    );
+    await apiFetch("/echo", { method: "POST", body: "{}" });
+    expect(observedHeader).toBe("abc123");
+  });
+
+  it("does not attach X-CSRF-Token when token is unset", async () => {
+    let observedHeader: string | null = "sentinel";
+    server.use(
+      http.post(`${env.apiBaseUrl}/echo`, ({ request }) => {
+        observedHeader = request.headers.get("X-CSRF-Token");
+        return HttpResponse.json({});
+      }),
+    );
+    await apiFetch("/echo", { method: "POST", body: "{}" });
+    expect(observedHeader).toBeNull();
+  });
+
+  it("returns undefined for 204", async () => {
+    server.use(
+      http.delete(`${env.apiBaseUrl}/gone`, () => new HttpResponse(null, { status: 204 })),
+    );
+    const result = await apiFetch<void>("/gone", { method: "DELETE" });
+    expect(result).toBeUndefined();
+  });
+});
+
+describe("apiFetch — field validation errors", () => {
+  afterEach(() => server.resetHandlers());
+
+  function respond(body: Record<string, unknown>, status = 422) {
+    server.use(http.post(`${env.apiBaseUrl}/signup`, () => HttpResponse.json(body, { status })));
+  }
+
+  async function reject(): Promise<ApiError> {
+    try {
+      await apiFetch("/signup", { method: "POST", body: "{}" });
+    } catch (e) {
+      return e as ApiError;
+    }
+    throw new Error("expected apiFetch to reject");
+  }
+
+  it("indexes FastAPI's per-field messages by field name", async () => {
+    respond({
+      detail: [
+        {
+          type: "value_error",
+          loc: ["body", "display_name"],
+          msg: "Value error, display_name must not be an email address",
+          input: "a@b.c",
+        },
+      ],
+    });
+    const err = await reject();
+    expect(err.fieldErrors).toEqual({
+      display_name: "display_name must not be an email address",
+    });
+  });
+
+  it("uses the first field message as the error message", async () => {
+    respond({
+      detail: [
+        { type: "missing", loc: ["body", "email"], msg: "Field required" },
+        { type: "missing", loc: ["body", "password"], msg: "Field required" },
+      ],
+    });
+    const err = await reject();
+    expect(err.message).toBe("Field required");
+    expect(err.fieldErrors).toEqual({ email: "Field required", password: "Field required" });
+  });
+
+  it("leaves a message Pydantic did not stamp alone", async () => {
+    respond({
+      detail: [{ type: "assertion_error", loc: ["body", "email"], msg: "Assertion failed, nope" }],
+    });
+    const err = await reject();
+    expect(err.fieldErrors).toEqual({ email: "Assertion failed, nope" });
+  });
+
+  it("keeps the first message when one field errors twice", async () => {
+    respond({
+      detail: [
+        { type: "value_error", loc: ["body", "display_name"], msg: "Value error, first" },
+        { type: "string_too_long", loc: ["body", "display_name"], msg: "second" },
+      ],
+    });
+    const err = await reject();
+    expect(err.fieldErrors).toEqual({ display_name: "first" });
+  });
+
+  it("joins nested locations and keeps non-body locations addressable", async () => {
+    respond({
+      detail: [
+        { type: "int_parsing", loc: ["query", "page"], msg: "Input should be a valid integer" },
+        { type: "missing", loc: ["body", "items", 0, "name"], msg: "Field required" },
+        { type: "json_invalid", loc: ["body"], msg: "JSON decode error" },
+      ],
+    });
+    const err = await reject();
+    expect(err.fieldErrors).toEqual({
+      page: "Input should be a valid integer",
+      "items.0.name": "Field required",
+      body: "JSON decode error",
+    });
+  });
+
+  it("leaves a string detail rendering exactly as it does today", async () => {
+    respond({ detail: "Invite code is invalid." });
+    const err = await reject();
+    expect(err.message).toBe("Invite code is invalid.");
+    expect(err.fieldErrors).toBeUndefined();
+  });
+
+  it("falls back to the generic message when the list holds no usable entries", async () => {
+    respond({ detail: [{ nope: true }, "not an object", null] });
+    const err = await reject();
+    expect(err.message).toBe("Request failed with status 422");
+    expect(err.fieldErrors).toBeUndefined();
+  });
+
+  it("falls back to the generic message when detail is neither shape", async () => {
+    respond({ detail: { display_name: "bad" } });
+    const err = await reject();
+    expect(err.message).toBe("Request failed with status 422");
+    expect(err.fieldErrors).toBeUndefined();
+  });
+});
+
+describe("apiFetch — Retry-After", () => {
+  afterEach(() => server.resetHandlers());
+
+  async function rejectWith(headers: Record<string, string>): Promise<ApiError> {
+    server.use(
+      http.patch(`${env.apiBaseUrl}/me/handle`, () =>
+        HttpResponse.json({ detail: "rate_limited" }, { status: 429, headers }),
+      ),
+    );
+    try {
+      await apiFetch("/me/handle", { method: "PATCH", body: "{}" });
+    } catch (e) {
+      return e as ApiError;
+    }
+    throw new Error("expected apiFetch to reject");
+  }
+
+  it("parses the delta-seconds header onto the error", async () => {
+    const err = await rejectWith({ "Retry-After": "2592000" });
+    expect(err.retryAfterSeconds).toBe(2_592_000);
+  });
+
+  it("leaves it undefined when the response carried no header", async () => {
+    const err = await rejectWith({});
+    expect(err.retryAfterSeconds).toBeUndefined();
+  });
+
+  it("leaves it undefined for a value that is not a number, without throwing", async () => {
+    // The HTTP-date form is legal and this API never sends it; a caller gets
+    // `undefined` and says something vaguer rather than a date in 1970.
+    const err = await rejectWith({ "Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT" });
+    expect(err.retryAfterSeconds).toBeUndefined();
+  });
+
+  it("leaves it undefined for an empty header rather than reading it as zero", async () => {
+    const err = await rejectWith({ "Retry-After": "  " });
+    expect(err.retryAfterSeconds).toBeUndefined();
+  });
+});

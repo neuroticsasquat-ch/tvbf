@@ -26,6 +26,29 @@ def include_name(name, type_, parent_names):
     return True
 
 
+# The search indexes only the migrations create, by design: the folded ones are expression
+# indexes over `immutable_unaccent` that the models can't declare (see `catalog.models.Person`),
+# and the two raw-column ones were never declared either, so the test suite's `create_all`
+# needs no pg_trgm. Autogenerate would otherwise read each as a removed index, and CI's
+# `alembic check` (NEU-2235) would fail on them. Listed by name, not by an `_trgm` suffix, so
+# a new migration-only index has to be added here on purpose.
+MIGRATION_ONLY_INDEXES = frozenset(
+    {
+        "ix_person_name_folded_trgm",
+        "ix_show_name_folded_trgm",
+        "ix_show_name_trgm",
+        "ix_show_aka_title_folded_trgm",
+        "ix_show_aka_title_trgm",
+    }
+)
+
+
+def include_object(object_, name, type_, reflected, compare_to):
+    return not (
+        type_ == "index" and reflected and compare_to is None and name in MIGRATION_ONLY_INDEXES
+    )
+
+
 def run_migrations_offline() -> None:
     context.configure(
         url=config.get_main_option("sqlalchemy.url"),
@@ -33,6 +56,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         include_schemas=True,
         include_name=include_name,
+        include_object=include_object,
         version_table_schema="app",
         dialect_opts={"paramstyle": "named"},
     )
@@ -46,6 +70,7 @@ def do_run_migrations(connection: Connection) -> None:
         target_metadata=target_metadata,
         include_schemas=True,
         include_name=include_name,
+        include_object=include_object,
         version_table_schema="app",
     )
     with context.begin_transaction():

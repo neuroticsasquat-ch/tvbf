@@ -1,0 +1,216 @@
+import { HttpResponse, http } from "msw";
+import { env } from "@/env";
+import { normaliseHandle } from "@/lib/handle";
+import {
+  fixtureCast,
+  fixtureCrew,
+  fixtureSeasonCast,
+  fixtureSeasonCrew,
+  fixtureShowEpisodeCrew,
+  fixtureShowGuestCast,
+  fixtureEpisodeCrew,
+  fixtureEpisodes,
+  fixtureGenres,
+  fixtureGuestCast,
+  fixtureNetworks,
+  fixturePerson,
+  fixturePersonCredits,
+  fixturePersonListPage,
+  fixtureSeason2Episodes,
+  fixtureShow,
+  fixtureShowListPage,
+} from "./fixtures";
+
+const base = env.apiBaseUrl;
+
+export const handlers = [
+  // Default: unauthenticated — individual tests can override with server.use(...)
+  http.get(`${base}/me`, () => HttpResponse.json({ detail: "auth_required" }, { status: 401 })),
+  http.get(`${base}/me/shows`, () => HttpResponse.json([])),
+  http.get(`${base}/me/watched`, () => HttpResponse.json([])),
+  http.get(`${base}/me/watch-next`, () => HttpResponse.json([])),
+  http.get(`${base}/me/upcoming`, () => HttpResponse.json([])),
+  http.get(`${base}/me/sessions`, () => HttpResponse.json([])),
+  http.get(`${base}/me/push/subscriptions`, () => HttpResponse.json([])),
+  // Empty is the common case and is a 200 with an empty list, never a 204 —
+  // the section distinguishes "nothing to show" from "the request failed" by
+  // status code (NEU-1112 contract §3).
+  http.get(`${base}/me/recommendations`, () => HttpResponse.json({ recommendations: [] })),
+  // An empty snapshot is a 200 with a null `captured_at` — the same body a
+  // stale one gives, so nothing downstream can tell them apart (NEU-1056
+  // contract §3). Tests that want the tab populated serve their own rows.
+  http.get(`${base}/trending`, () => HttpResponse.json({ captured_at: null, shows: [] })),
+  // A bare array, never an object: nothing is stored, so there is no
+  // `captured_at` to wrap the list in (NEU-1059 contract §2). Tests that want
+  // the tab populated serve their own rows.
+  http.get(`${base}/anticipated`, () => HttpResponse.json([])),
+  // The viewer with no connections: `connection_count: 0` with an empty list,
+  // which is a 200 and never a 204 (Popular with Friends spec §5.2). Tests that
+  // want the other empty state or rows serve their own body.
+  http.get(`${base}/me/friends/popular`, () =>
+    HttpResponse.json({ window_days: 14, connection_count: 0, shows: [] }),
+  ),
+  http.get(`${base}/genres`, () => HttpResponse.json(fixtureGenres)),
+  http.get(`${base}/networks`, () => HttpResponse.json(fixtureNetworks)),
+  http.get(`${base}/shows`, () => HttpResponse.json(fixtureShowListPage)),
+  http.get(`${base}/shows/100`, () => HttpResponse.json(fixtureShow)),
+  http.get(`${base}/shows/:id`, () =>
+    HttpResponse.json({ detail: "show not found" }, { status: 404 }),
+  ),
+  http.get(`${base}/shows/100/cast`, () => HttpResponse.json(fixtureCast)),
+  http.get(`${base}/shows/100/guest-cast`, () => HttpResponse.json(fixtureShowGuestCast)),
+  http.get(`${base}/shows/100/crew`, () => HttpResponse.json(fixtureCrew)),
+  http.get(`${base}/shows/100/episode-crew`, () => HttpResponse.json(fixtureShowEpisodeCrew)),
+  http.get(`${base}/shows/100/seasons/1/cast`, () => HttpResponse.json(fixtureSeasonCast)),
+  http.get(`${base}/shows/100/seasons/1/crew`, () => HttpResponse.json(fixtureSeasonCrew)),
+  // Every other show and season has no credits — the empty case is 27% of the
+  // catalog.
+  http.get(`${base}/shows/:id/cast`, () => HttpResponse.json([])),
+  http.get(`${base}/shows/:id/guest-cast`, () => HttpResponse.json([])),
+  http.get(`${base}/shows/:id/crew`, () => HttpResponse.json([])),
+  http.get(`${base}/shows/:id/episode-crew`, () => HttpResponse.json([])),
+  http.get(`${base}/shows/:id/seasons/:number/cast`, () =>
+    HttpResponse.json({ regulars: [], guests: [] }),
+  ),
+  http.get(`${base}/shows/:id/seasons/:number/crew`, () => HttpResponse.json([])),
+  // A show with no recommendations is 200 [] and renders no section at all —
+  // roughly 8% of the long tail (NEU-1054). Tests that want the section serve
+  // their own rows.
+  http.get(`${base}/shows/:id/similar`, () => HttpResponse.json([])),
+  http.get(`${base}/episodes/5000/guest-cast`, () => HttpResponse.json(fixtureGuestCast)),
+  // Every other episode has no guest cast — that is 96% of the catalog.
+  http.get(`${base}/episodes/:id/guest-cast`, () => HttpResponse.json([])),
+  http.get(`${base}/episodes/5000/crew`, () => HttpResponse.json(fixtureEpisodeCrew)),
+  // Every other episode has no crew — 22.5% of episodes land here.
+  http.get(`${base}/episodes/:id/crew`, () => HttpResponse.json([])),
+  http.get(`${base}/people`, () => HttpResponse.json(fixturePersonListPage)),
+  http.get(`${base}/people/300`, () => HttpResponse.json(fixturePerson)),
+  http.get(`${base}/people/300/credits`, () => HttpResponse.json(fixturePersonCredits)),
+  // Every other person has no credits — plenty in the mirror have none at all.
+  http.get(`${base}/people/:id/credits`, () =>
+    HttpResponse.json({ cast: [], crew: [], guest_cast: [], episode_crew: [] }),
+  ),
+  http.get(`${base}/people/:id`, () =>
+    HttpResponse.json({ detail: "person not found" }, { status: 404 }),
+  ),
+  http.get(`${base}/shows/100/episodes`, ({ request }) => {
+    const url = new URL(request.url);
+    const season = url.searchParams.get("season");
+    if (season === "2") return HttpResponse.json(fixtureSeason2Episodes);
+    return HttpResponse.json(fixtureEpisodes);
+  }),
+  http.put(`${base}/me/shows/:id/rating`, async ({ params, request }) => {
+    const body = (await request.json()) as { stars: number };
+    return HttpResponse.json({
+      show_id: Number(params.id),
+      stars: body.stars,
+      rated_at: "2026-05-14T12:00:00Z",
+    });
+  }),
+  http.delete(`${base}/me/shows/:id/rating`, () => new HttpResponse(null, { status: 204 })),
+  // The per-show push mute (NEU-1490 / NEU-1495): 204 on success, as the
+  // backend answers it. Tests asserting the body or a failure override it.
+  http.patch(`${base}/me/shows/:id/mute`, () => new HttpResponse(null, { status: 204 })),
+  http.put(`${base}/me/episodes/:id/rating`, async ({ params, request }) => {
+    const body = (await request.json()) as { stars: number };
+    return HttpResponse.json({
+      episode_id: Number(params.id),
+      stars: body.stars,
+      rated_at: "2026-05-14T12:00:00Z",
+    });
+  }),
+  http.delete(`${base}/me/episodes/:id/rating`, () => new HttpResponse(null, { status: 204 })),
+  http.get(`${base}/shows/:id/friends/ratings`, () =>
+    HttpResponse.json({ avg: null, count: 0, items: [] }),
+  ),
+  http.get(`${base}/episodes/:id/friends/ratings`, () =>
+    HttpResponse.json({ avg: null, count: 0, items: [] }),
+  ),
+  // Signup succeeds by default. The Turnstile token is optional on the wire —
+  // the backend decides that "verification enabled means required" and answers
+  // 400 `captcha_required` itself (NEU-1160 §7) — so this handler accepts a
+  // request with or without one, and tests that want a refusal serve it.
+  http.post(`${base}/auth/signup`, async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { email?: string };
+    return HttpResponse.json(
+      {
+        id: "u1",
+        email: body.email ?? "x@y.com",
+        display_name: "X",
+        handle: "x_user",
+        created_at: new Date().toISOString(),
+        csrf_token: "test-csrf",
+      },
+      { status: 201 },
+    );
+  }),
+  // `PATCH /me/handle` succeeds by default and echoes the handle back
+  // normalised, as the server does (NEU-1163 §1.1). The two refusals it can
+  // give — a 409 for a taken or previously-released handle, and a 429 carrying
+  // `Retry-After` — are served per-test, so each is exercised against the real
+  // wire shape rather than a hand-built `ApiError`.
+  http.patch(`${base}/me/handle`, async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { handle?: string };
+    return HttpResponse.json({
+      id: "u1",
+      email: "x@y.com",
+      display_name: "X",
+      // Through the shared normaliser, not a second copy of it: this handler
+      // stands in for the server, so a drift here would silently invalidate
+      // every test that asserts what gets stored.
+      handle: normaliseHandle(body.handle ?? ""),
+      created_at: new Date().toISOString(),
+      email_verified_at: null,
+      csrf_token: "test-csrf",
+    });
+  }),
+  // Social routes. `GET /users/search` answers 200 with a filtered list even
+  // for an unverified caller — it never 403s (NEU-1161 §4), so the empty list
+  // is the whole default and tests that want rows serve their own.
+  http.get(`${base}/users/search`, () => HttpResponse.json([])),
+  // `POST /connection-requests` succeeds by default; the 403
+  // `{"detail": "email_not_verified"}` shape is served per-test, so the
+  // verification backstop is exercised against the real wire body rather than
+  // a hand-built `ApiError`.
+  http.post(`${base}/connection-requests`, async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { addressee_id?: string };
+    return HttpResponse.json(
+      {
+        id: "req-1",
+        requester: { id: "u1", display_name: "Me", handle: "me_user" },
+        addressee: { id: body.addressee_id ?? "u2", display_name: "Them", handle: "them_user" },
+        state: "pending",
+        created_at: new Date().toISOString(),
+        responded_at: null,
+      },
+      { status: 201 },
+    );
+  }),
+  // The resend route: 202 with no body on success. Its 429 `rate_limited` is
+  // served per-test.
+  http.post(`${base}/me/email/verification`, () => new HttpResponse(null, { status: 202 })),
+  http.post(`${base}/me/feedback`, async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      subject?: string;
+      body?: string;
+    };
+    if (!body.subject || !body.body) {
+      return HttpResponse.json({ detail: "Validation error" }, { status: 422 });
+    }
+    return new HttpResponse(null, { status: 204 });
+  }),
+  // `POST /reports` succeeds by default, so any surface test that renders
+  // `ReportUserButton` does not fail on an unhandled request. Its failure paths
+  // (429 `rate_limited`, 404 `reported_user_not_found`) are per-test
+  // `server.use` overrides, for the reason the connection-request 403 is.
+  http.post(`${base}/reports`, async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      reported_user_id?: string;
+      reason?: string;
+    };
+    if (!body.reported_user_id || !body.reason) {
+      return HttpResponse.json({ detail: "Validation error" }, { status: 422 });
+    }
+    return new HttpResponse(null, { status: 204 });
+  }),
+];

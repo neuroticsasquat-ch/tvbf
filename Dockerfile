@@ -24,15 +24,16 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 
 
+# The dev dependency group is installed by default; prod leaves it out with --no-dev.
 FROM base AS dev
 
-RUN uv sync --locked --inexact --no-cache --extra dev --no-install-project
+RUN uv sync --locked --inexact --no-cache --no-install-project
 
 COPY src/ src/
 COPY alembic.ini alembic.ini
 COPY migrations/ migrations/
 
-RUN uv sync --locked --inexact --no-cache --extra dev
+RUN uv sync --locked --inexact --no-cache
 
 EXPOSE 8000
 
@@ -48,6 +49,13 @@ COPY alembic.ini alembic.ini
 COPY migrations/ migrations/
 
 RUN uv sync --locked --inexact --no-cache --no-dev --no-editable
+
+# Not root (ops: Shared CI workflows, Decision 13; CI's image job checks it). Nothing in
+# the image is written at runtime: no volume, no bytecode (PYTHONDONTWRITEBYTECODE), and
+# migrations and the scheduled jobs only talk to Postgres. Everything above stays
+# root-owned, which the user only needs to read.
+RUN useradd --system --create-home --uid 10001 tvbf
+USER tvbf
 
 EXPOSE 8000
 

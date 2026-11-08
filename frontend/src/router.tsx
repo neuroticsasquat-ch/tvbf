@@ -1,0 +1,74 @@
+import { createBrowserRouter, Navigate } from "react-router";
+import { AppShell } from "@/components/AppShell";
+import { SearchPage } from "@/pages/SearchPage";
+import { ShowDetailPage } from "@/pages/ShowDetailPage";
+import { EpisodesPage } from "@/pages/EpisodesPage";
+import { EpisodePage } from "@/pages/EpisodePage";
+import { PersonPage } from "@/pages/PersonPage";
+import { NotFoundPage } from "@/pages/NotFoundPage";
+import { LoginPage } from "@/pages/LoginPage";
+import { SignupPage } from "@/pages/SignupPage";
+import { RequireAuth } from "@/components/RequireAuth";
+import { WatchNextPage } from "@/pages/WatchNextPage";
+import { UpcomingPage } from "@/pages/UpcomingPage";
+import { DiscoverPage } from "@/pages/DiscoverPage";
+import { MyShowsPage } from "@/pages/MyShowsPage";
+import { AdminPage } from "@/pages/AdminPage";
+import { FriendProfilePage } from "@/pages/FriendProfilePage";
+import { FriendsFeedPage } from "@/pages/FriendsFeedPage";
+import { SettingsPage } from "@/pages/SettingsPage";
+import { VerifyEmailPage } from "@/pages/VerifyEmailPage";
+import { EmailChangeConfirmPage } from "@/pages/EmailChangeConfirmPage";
+import { ForgotPasswordPage } from "@/pages/ForgotPasswordPage";
+import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
+import { TermsPage } from "@/pages/TermsPage";
+import { PrivacyPage } from "@/pages/PrivacyPage";
+import { AboutPage } from "@/pages/AboutPage";
+import { ContactPage } from "@/pages/ContactPage";
+import { ErrorTestPage } from "@/pages/ErrorTestPage";
+
+export const router = createBrowserRouter([
+  {
+    path: "/",
+    element: <AppShell />,
+    children: [
+      { path: "login", element: <LoginPage /> },
+      { path: "signup", element: <SignupPage /> },
+      { path: "verify-email", element: <VerifyEmailPage /> },
+      { path: "email-change/confirm", element: <EmailChangeConfirmPage /> },
+      { path: "forgot-password", element: <ForgotPasswordPage /> },
+      { path: "reset-password", element: <ResetPasswordPage /> },
+      { path: "terms", element: <TermsPage /> },
+      { path: "privacy", element: <PrivacyPage /> },
+      { path: "about", element: <AboutPage /> },
+      { path: "contact", element: <ContactPage /> },
+      // Unlinked: forces a test error for the Bugsink runbook (NEU-1593).
+      { path: "debug/error", element: <ErrorTestPage /> },
+      {
+        element: <RequireAuth />,
+        children: [
+          { index: true, element: <WatchNextPage /> },
+          { path: "upcoming", element: <UpcomingPage /> },
+          { path: "discover", element: <DiscoverPage /> },
+          { path: "my-shows", element: <MyShowsPage /> },
+          { path: "friends", element: <FriendsFeedPage /> },
+          { path: "admin", element: <AdminPage /> },
+          { path: "connections", element: <Navigate to="/friends?section=connections" replace /> },
+          { path: "settings", element: <SettingsPage /> },
+          { path: "users/:userId", element: <FriendProfilePage /> },
+          // Redirects from old paths.
+          { path: "watch-next", element: <Navigate to="/" replace /> },
+          { path: "all", element: <Navigate to="/my-shows" replace /> },
+          { path: "watched", element: <Navigate to="/my-shows" replace /> },
+          { path: "my-shows/watched", element: <Navigate to="/my-shows" replace /> },
+          { path: "search", element: <SearchPage /> },
+          { path: "shows/:id", element: <ShowDetailPage /> },
+          { path: "shows/:id/episodes", element: <EpisodesPage /> },
+          { path: "episodes/:episodeId", element: <EpisodePage /> },
+          { path: "people/:personId", element: <PersonPage /> },
+          { path: "*", element: <NotFoundPage /> },
+        ],
+      },
+    ],
+  },
+]);

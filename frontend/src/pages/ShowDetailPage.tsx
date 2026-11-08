@@ -1,0 +1,347 @@
+import { useState } from "react";
+import { Link, useParams, useSearchParams } from "react-router";
+import {
+  useShow,
+  useShowCast,
+  useShowCrew,
+  useShowEpisodeCrew,
+  useShowGuestCast,
+  useSimilarShows,
+} from "@/api/shows";
+import { useAuth } from "@/components/AuthContext";
+import { ApiError } from "@/api/client";
+import { LoadingState } from "@/components/LoadingState";
+import { ErrorState } from "@/components/ErrorState";
+import { NotFoundPage } from "./NotFoundPage";
+import { CollapsibleSummary } from "@/components/CollapsibleSummary";
+import { Badge } from "@/components/ui/badge";
+import { MyShowsToggle } from "@/components/MyShowsToggle";
+import { HideFromActivityToggle } from "@/components/friends/HideFromActivityToggle";
+import { ShowWatchCheckbox } from "@/components/ShowWatchCheckbox";
+import { NextEpisodeCard } from "@/components/NextEpisodeCard";
+import { ShowFriendActivityStrip } from "@/components/friends/FriendActivity";
+import { FriendRatingsList } from "@/components/FriendRatingsList";
+import { WatchProgressBar } from "@/components/WatchProgressBar";
+import { SeasonWatchCheckbox } from "@/components/SeasonWatchCheckbox";
+import { ShowCastList, ShowGuestCastList } from "@/components/CastList";
+import { ShowCrewList, ShowEpisodeCrewList } from "@/components/CrewList";
+import { SimilarShows } from "@/components/SimilarShows";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useMyShows, useSeasonProgress, useShowRating } from "@/api/me";
+import { Tv } from "lucide-react";
+import { RatingBadge } from "@/components/RatingBadge";
+import { StarRatingInput } from "@/components/StarRatingInput";
+import { tenPointToFiveStar } from "@/lib/rating";
+import { seasonLabel } from "@/lib/season";
+import { TabCount } from "@/components/TabCount";
+
+function yearRange(premiered: string | null, ended: string | null) {
+  if (!premiered) return "—";
+  const start = premiered.slice(0, 4);
+  const end = ended ? ended.slice(0, 4) : "present";
+  return start === end ? start : `${start} – ${end}`;
+}
+
+export function ShowDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const showId = Number(id);
+  const query = useShow(showId);
+  const myShowsQuery = useMyShows();
+  const myEntry = myShowsQuery.data?.find((e) => e.show.id === showId);
+  const { user } = useAuth();
+  const progressQuery = useSeasonProgress(showId, !!user && !!myEntry);
+  const rate = useShowRating(showId);
+  const [seasonFilter, setSeasonFilter] = useState<"all" | "unwatched">("all");
+
+  // Fetched here for the tab counts. The panels run the same queries and
+  // React Query dedupes on the key, so this costs no extra request.
+  //
+  // Since NEU-1512 the server splits both credit lists: Cast is the regulars
+  // and Guest stars the rest, Crew is series crew and Episode crew the rest.
+  // 44% of shows have no cast and 83% no crew. Those tabs still render, showing
+  // a zero count and disabled — the absence is information, and a fixed tab
+  // strip beats one that pops in a tab when a query resolves. A tab stays
+  // enabled while its query is in flight (nothing to report yet) and on error,
+  // where disabling would bury the ErrorState the panel renders. Similar joins
+  // them on the same terms: roughly 8% of the long tail has no recommendations,
+  // and a strip that changes width when a query resolves moves the other tabs
+  // under the reader's cursor.
+  const counted = {
+    cast: useShowCast(showId),
+    "guest-stars": useShowGuestCast(showId),
+    crew: useShowCrew(showId),
+    "episode-crew": useShowEpisodeCrew(showId),
+    similar: useSimilarShows(showId),
+  };
+  type CountedTab = keyof typeof counted;
+  const isEmpty = (key: CountedTab) =>
+    counted[key].isSuccess && (counted[key].data?.length ?? 0) === 0;
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requested = searchParams.get("tab");
+  // Falls back to seasons for an unknown value, and for a tab this show has
+  // nothing to put in — a `?tab=crew` link to a crewless show should not land
+  // on a disabled tab.
+  const wanted =
+    requested !== null && Object.hasOwn(counted, requested) ? (requested as CountedTab) : null;
+  const tab = wanted === null || isEmpty(wanted) ? "seasons" : wanted;
+
+  /** One counted tab trigger. The count appears once its query has answered. */
+  function countedTrigger(key: CountedTab, label: string) {
+    const query = counted[key];
+    return (
+      <TabsTrigger value={key} disabled={isEmpty(key)}>
+        {label} {query.isSuccess && <TabCount value={query.data?.length ?? 0} />}
+      </TabsTrigger>
+    );
+  }
+
+  function selectTab(next: string) {
+    const params = new URLSearchParams(searchParams);
+    // Seasons is the default, so it stays out of the URL entirely.
+    if (next === "seasons") params.delete("tab");
+    else params.set("tab", next);
+    // Replace rather than push: tab switches should not stack up history
+    // entries between the user and the page they arrived from.
+    setSearchParams(params, { replace: true });
+  }
+
+  if (query.isPending) return <LoadingState rows={1} />;
+  if (query.isError) {
+    if (query.error instanceof ApiError && query.error.status === 404) return <NotFoundPage />;
+    return <ErrorState message={query.error.message} onRetry={() => query.refetch()} />;
+  }
+  const show = query.data;
+  return (
+    <article className="space-y-6">
+      <header className="flex flex-col gap-6 sm:flex-row">
+        {show.image_medium ? (
+          <img
+            src={show.image_medium}
+            alt=""
+            className="w-40 self-start rounded border border-border"
+          />
+        ) : null}
+        <div className="flex-1 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-3xl font-semibold">{show.name}</h1>
+            <RatingBadge
+              kind="aggregate"
+              crowdName="TMDB"
+              value={tenPointToFiveStar(show.rating_average)}
+            />
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {yearRange(show.premiered, show.ended)}
+            {show.network?.name ? ` · ${show.network.name}` : ""}
+            {show.status ? ` · ${show.status}` : ""}
+            {show.runtime ? ` · ${show.runtime} min` : ""}
+          </p>
+          <div className="flex flex-wrap gap-1">
+            {show.genres.map((g) => (
+              <Badge key={g} variant="secondary">
+                {g}
+              </Badge>
+            ))}
+          </div>
+          <CollapsibleSummary html={show.summary} className="prose prose-sm max-w-none pt-2" />
+          {myEntry && myEntry.aired_episode_count > 0 ? (
+            <div className="pt-2">
+              <WatchProgressBar
+                watched={myEntry.watched_episode_count}
+                aired={myEntry.aired_episode_count}
+                upcoming={myEntry.upcoming_episode_count}
+              />
+            </div>
+          ) : null}
+          <div className="flex flex-wrap items-center gap-2 pt-3">
+            <MyShowsToggle showId={show.id} showName={show.name} />
+            {myEntry && (
+              <ShowWatchCheckbox
+                showId={show.id}
+                watchedCount={myEntry.watched_episode_count}
+                airedCount={myEntry.aired_episode_count}
+              />
+            )}
+          </div>
+          {myEntry && (
+            <div className="pt-2">
+              <HideFromActivityToggle
+                showId={show.id}
+                value={myEntry.hide_from_activity ?? false}
+              />
+            </div>
+          )}
+        </div>
+      </header>
+
+      {user ? (
+        <section>
+          <h2 className="text-base font-semibold">Your rating</h2>
+          <StarRatingInput
+            value={show.my_rating}
+            onChange={(next) => rate.mutate(next)}
+            disabled={!user}
+          />
+        </section>
+      ) : null}
+
+      <ShowFriendActivityStrip showId={show.id} />
+
+      <FriendRatingsList showId={show.id} />
+
+      <NextEpisodeCard showId={show.id} />
+
+      <Tabs value={tab} onValueChange={selectTab}>
+        {/* Six triggers overflow a phone, so the strip scrolls rather than
+            wraps — the person page's strip does the same. */}
+        <TabsList className="w-full justify-start overflow-x-auto">
+          <TabsTrigger value="seasons">
+            Seasons <TabCount value={show.seasons.length} />
+          </TabsTrigger>
+          {countedTrigger("cast", "Cast")}
+          {countedTrigger("guest-stars", "Guest stars")}
+          {countedTrigger("crew", "Crew")}
+          {countedTrigger("episode-crew", "Episode crew")}
+          {countedTrigger("similar", "Similar")}
+        </TabsList>
+
+        <TabsContent value="seasons">
+          <div className="mb-3 flex items-center justify-end gap-2">
+            {/* The tab label carries the visible title and count; this stays for
+              the document outline and screen readers. */}
+            <h2 className="sr-only">
+              Seasons{" "}
+              <span className="font-normal text-muted-foreground">({show.seasons.length})</span>
+            </h2>
+            {myEntry && progressQuery.data && (
+              <div
+                role="radiogroup"
+                aria-label="Filter seasons"
+                className="inline-flex rounded border border-border text-sm"
+              >
+                {(["all", "unwatched"] as const).map((key) => (
+                  <button
+                    key={key}
+                    type="button"
+                    role="radio"
+                    aria-checked={seasonFilter === key}
+                    onClick={() => setSeasonFilter(key)}
+                    className={`px-3 py-1 capitalize ${
+                      seasonFilter === key
+                        ? "bg-foreground text-background"
+                        : "text-foreground hover:bg-accent"
+                    }`}
+                  >
+                    {key}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          {(() => {
+            const progressMap = new Map((progressQuery.data ?? []).map((p) => [p.season, p]));
+            const filtered =
+              seasonFilter === "unwatched" && myEntry
+                ? show.seasons.filter((s) => {
+                    const p = progressMap.get(s.number);
+                    return p ? p.aired > p.watched : false;
+                  })
+                : show.seasons;
+            if (show.seasons.length === 0) {
+              return <p className="text-sm text-muted-foreground">No seasons available.</p>;
+            }
+            if (filtered.length === 0) {
+              return <p className="text-sm text-muted-foreground">No unwatched seasons.</p>;
+            }
+            return (
+              <ul className="space-y-3">
+                {filtered.map((s) => {
+                  const p = progressMap.get(s.number);
+                  const aired = p?.aired ?? 0;
+                  const watched = p?.watched ?? 0;
+                  const upcoming =
+                    (s.episode_order ?? 0) > aired ? (s.episode_order ?? 0) - aired : 0;
+                  const year = s.premiere_date ? s.premiere_date.slice(0, 4) : null;
+                  const thumbnail = s.image_medium ?? show.image_medium;
+                  return (
+                    <li key={s.id} className="border border-border rounded p-3 hover:bg-accent">
+                      <div className="flex items-center gap-4">
+                        <Link
+                          to={`/shows/${show.id}/episodes?season=${s.number}`}
+                          className="flex flex-1 min-w-0 items-center gap-4"
+                        >
+                          {thumbnail ? (
+                            <img
+                              src={thumbnail}
+                              alt=""
+                              className="w-20 aspect-[210/295] object-cover rounded shrink-0"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div
+                              aria-hidden
+                              className="w-20 aspect-[210/295] rounded shrink-0 bg-muted text-muted-foreground flex items-center justify-center"
+                            >
+                              <Tv className="h-6 w-6" />
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-base text-foreground leading-tight truncate">
+                              {seasonLabel(s)}
+                              {year && <span className="text-muted-foreground"> — {year}</span>}
+                            </p>
+                            <p className="text-xs text-muted-foreground leading-tight">
+                              {s.episode_order ?? "?"} episodes
+                            </p>
+                            {myEntry && p && aired > 0 && (
+                              <WatchProgressBar
+                                watched={watched}
+                                aired={aired}
+                                upcoming={upcoming}
+                              />
+                            )}
+                          </div>
+                        </Link>
+                        {myEntry && aired > 0 && (
+                          <div className="ml-auto shrink-0">
+                            <SeasonWatchCheckbox
+                              showId={show.id}
+                              season={s.number}
+                              aired={aired}
+                              watched={watched}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            );
+          })()}
+        </TabsContent>
+
+        <TabsContent value="cast">
+          <ShowCastList showId={show.id} headingHidden />
+        </TabsContent>
+
+        <TabsContent value="guest-stars">
+          <ShowGuestCastList showId={show.id} headingHidden />
+        </TabsContent>
+
+        <TabsContent value="crew">
+          <ShowCrewList showId={show.id} headingHidden />
+        </TabsContent>
+
+        <TabsContent value="episode-crew">
+          <ShowEpisodeCrewList showId={show.id} headingHidden />
+        </TabsContent>
+
+        <TabsContent value="similar">
+          <SimilarShows showId={show.id} />
+        </TabsContent>
+      </Tabs>
+    </article>
+  );
+}

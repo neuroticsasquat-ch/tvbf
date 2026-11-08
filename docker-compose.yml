@@ -25,6 +25,11 @@ services:
       ADMIN_TOKEN: "${ADMIN_TOKEN:-dev-secret-change-me}"
       CORS_ALLOWED_ORIGINS: "${CORS_ALLOWED_ORIGINS:-https://app.tvbf.localhost}"
       COOKIE_DOMAIN: "${COOKIE_DOMAIN:-.tvbf.localhost}"
+      # The pyright wrapper fetches Node through nodeenv on first run in a new
+      # container. Asked for "latest", nodeenv dies parsing a `-alpha` entry in
+      # Node's release index (2026-11-08), so name a version. CI is unaffected:
+      # the runner already has node on PATH, which the wrapper prefers.
+      PYRIGHT_PYTHON_NODE_VERSION: "${PYRIGHT_PYTHON_NODE_VERSION:-22.12.0}"
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=proxy"
@@ -47,6 +52,39 @@ services:
       start_period: 10s
     networks:
       - proxy
+
+  # The SPA, from frontend/ (NEU-2235). The browser calls the API directly at
+  # VITE_API_BASE_URL, so nothing here reaches the backend container. No published
+  # port: Traefik is the only route in.
+  tvbf-frontend:
+    build:
+      context: frontend
+      target: dev
+    volumes:
+      - ./frontend:/app
+      # The container's own node_modules (Linux binaries), not the host's.
+      - frontend_node_modules:/app/node_modules
+    environment:
+      VITE_API_BASE_URL: "${VITE_API_BASE_URL:-https://api.tvbf.localhost}"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.tvbf-frontend.rule=Host(`app.tvbf.localhost`)"
+      - "traefik.http.routers.tvbf-frontend.tls=true"
+      - "traefik.http.routers.tvbf-frontend.entrypoints=websecure"
+      - "traefik.http.services.tvbf-frontend.loadbalancer.server.port=5173"
+    # The SPA has no health route; Vite answering `/` is the readiness signal.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5173/"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+    networks:
+      - proxy
+
+volumes:
+  frontend_node_modules:
 
 networks:
   proxy:
