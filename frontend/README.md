@@ -1,0 +1,161 @@
+# tvbf-frontend
+
+React SPA for TV Binge Friend. Auth, catalog browse, search, watchlist, and per-episode watch tracking against the [tvbf-backend](../tvbf-backend) API.
+
+## Stack
+
+React 19 · Vite 6 · TypeScript · React Router 7 · TanStack Query · Tailwind v4 · shadcn/ui · Vitest + RTL + MSW.
+
+## Prerequisites
+
+- Docker Desktop.
+- [`go-task`](https://taskfile.dev) (`brew install go-task`).
+- [`tbc-localdev-infra`](../../tbc-localdev-infra) cloned at `~/projects/tbc-localdev-infra` (Traefik + shared Postgres). The dev setup here follows its `CONVENTIONS.md` (`~/projects/tbc-localdev-infra/CONVENTIONS.md`).
+- [`pre-commit`](https://pre-commit.com) (`brew install pre-commit`).
+- [`tvbf-backend`](../tvbf-backend) running (this SPA needs the API).
+
+No local Node/pnpm needed — everything runs in the `tvbf-frontend` service's container.
+
+## Quick start
+
+```sh
+task infra:up       # first run: shared Traefik + Postgres and the `proxy` network `build` needs
+task build          # build image, sync deps, start the container (also after dep changes)
+pre-commit install  # once per clone: lint/format/typecheck/test on commit (container must be up)
+```
+
+After that, `task up` starts the shared infra and then the dev container.
+
+Open **https://app.tvbf.localhost/**. Accept the self-signed cert; do the same once for **https://api.tvbf.localhost/** so the browser trusts the API origin and accepts cross-subdomain session cookies.
+
+A user account is required — sign up with an invite code issued by the backend's `POST /admin/invites`.
+
+## Commands
+
+All `task` targets run inside the container.
+
+| Target | Purpose |
+|---|---|
+| `task up` / `down` / `restart` / `build` / `logs` / `shell` | container lifecycle (`up` starts the shared infra too) |
+| `task test` | run Vitest once (`task test -- <path>` for a single file) |
+| `task test:watch` | Vitest watch mode |
+| `task lint` / `format` / `format:check` / `typecheck` | quality gates |
+| `task build:app` | production Vite build |
+| `task worker:check` | build, then dry-run the Worker deploy |
+| `task deps:add -- <pkg>` / `deps:add-dev -- <pkg>` / `deps:remove -- <pkg>` | add / remove deps via pnpm |
+
+## Architecture
+
+```
+src/
+  main.tsx                  # bootstrap: QueryClientProvider + RouterProvider + AuthProvider
+  router.tsx                # route tree (public + RequireAuth-gated)
+  env.ts                    # typed env access (VITE_API_BASE_URL)
+  api/                      # fetch client + typed endpoints (auth, shows, /me)
+  components/
+    AppShell, UserMenu      # sticky header, global search input, nav
+    AuthContext             # session bootstrap + auth state
+    SearchOverlay           # full-screen search results — covers any page
+    ShowGrid / ShowList     # browse result rows (poster grid + list views)
+    home/                   # FilterSheet picker + per-tab list components
+    *WatchCheckbox / Toggle # mark-watched primitives (episode / season / show)
+    ui/                     # shadcn/ui primitives (do not edit directly)
+  pages/                    # one component per route (Login, Signup, MyShows,
+                            # WatchNext, Upcoming, Search, ShowDetail, Episodes,
+                            # Episode, NotFound)
+  hooks/                    # localStorage-backed view/sort/filter persistence
+  test/                     # Vitest setup + MSW handlers + fixtures
+```
+
+**Routing:** logged-out users see `/login` and `/signup`; everything else is gated behind `<RequireAuth>` which redirects unauthenticated visitors to `/login` and bootstraps the session via `GET /me`.
+
+**Home tabs:** `/` is a tab layout — *My Shows*, *Watch Next*, *Upcoming*, *Search*. Each tab has its own list component under `components/home/` and persists view/sort/filter state per tab in localStorage.
+
+**Show / season / episode pages** share a `[breadcrumbs] → [H1 = sibling-picker via FilterSheet] → [content + watched-toggle paired with prev/next]` hierarchy. Cross-boundary navigation works (prev/next traverses seasons; season prev/next traverses the show).
+
+**URL state for browse:** filters, search, sort, and page live in the query string. Back button works; links are shareable.
+
+**API caching:** TanStack Query `staleTime: 5 min` matches the backend's `Cache-Control: public, max-age=300`. Mutations (mark-watched, add/remove from watchlist) invalidate the relevant queries on success.
+
+**Auth transport:** session cookie is set by the backend at login and scoped to `.tvbf.localhost`, so the SPA at `app.tvbf.localhost` sends it automatically to `api.tvbf.localhost`. No tokens, no localStorage auth, no `Authorization` header.
+
+**Service worker:** `public/sw.js` is hand-written plain JS, served as-is at the root so it gets root scope without a `Service-Worker-Allowed` header, and registered from `src/main.tsx` after first load by `src/lib/serviceWorker.ts`. It handles Web Push only — `push`, `notificationclick`, `pushsubscriptionchange` — and deliberately has no `fetch` handler and no caches, because offline support is out of scope (push-notifications project spec §6.1, in `tvbf-backend/docs/specs/`). That is also why there is no `vite-plugin-pwa` or Workbox: they exist to generate precache manifests, and a worker this small is easier to read, review and test as source than as build output. It cannot read Vite's env, so the API base reaches it as a `?api=` query on the registration URL. `src/sw.test.ts` evaluates it against a fake `self`.
+
+## Configuration
+
+Copy `.env.example` to `.env.local` (gitignored) to override:
+
+- `VITE_API_BASE_URL` — defaults to `https://api.tvbf.localhost`.
+- `VITE_TURNSTILE_SITE_KEY` — Cloudflare Turnstile's public site key. Blank (the default)
+  renders no verification widget on the signup form, which matches the backend shipping
+  with `TURNSTILE_ENABLED=False`. Production sets it in the Worker's build environment
+  (see [Deployment](#deployment)). The two switches live in different systems: turning
+  verification on server-side without setting this key leaves signup answering 400 `captcha_required`
+  for everyone, which the form reports as a temporary outage.
+
+  The page sets no Content-Security-Policy (checked 2026-10-16 — no meta CSP in
+  `index.html`, and `public/_headers` sets only the manifest's `Content-Type`),
+  so the widget's script from `challenges.cloudflare.com` needs no allowlist entry. Add
+  `script-src`/`frame-src` for that host if a CSP is ever introduced.
+
+- `VITE_SENTRY_DSN` — the Bugsink DSN for this project. Unset (the default) leaves
+  error reporting off.
+
+### Error reporting and source maps
+
+Errors go to Bugsink through `@sentry/react`, and a production build uploads its source maps
+there through `@sentry/vite-plugin`, matched to events by debug ID. Set these in the build
+environment, never with a `VITE_` prefix (that would put the token in the bundle):
+
+- `SENTRY_URL` — the Bugsink host, e.g. `https://bugsink.example.com`.
+- `SENTRY_AUTH_TOKEN` — a Bugsink auth token. Without it the build still succeeds: it emits
+  no source maps, skips the upload and logs a warning.
+- `SENTRY_ORG` / `SENTRY_PROJECT` — as Bugsink's project settings give them. Bugsink has no
+  orgs, so the org defaults to its placeholder `bugsinkhasnoorgs`; the project defaults to
+  `tvbf-frontend`.
+
+The maps are deleted from `dist/` after upload, so the CDN never serves them. The Sentry
+`release` is the commit SHA — `VITE_GIT_SHA`, else Workers Builds' `WORKERS_CI_COMMIT_SHA`,
+else `CF_PAGES_COMMIT_SHA` (kept until the Pages project is retired), else Coolify's
+`SOURCE_COMMIT` — and `environment` is the Vite mode (`production` for a build).
+`/debug/error` is an unlinked page whose button throws a known error, to confirm a deploy
+reports to Bugsink with a readable stack.
+
+## Deployment
+
+The app deploys as a Cloudflare Worker with static assets, built and deployed by Workers
+Builds (NEU-1629); moving production off the Pages project is the ops cutover's job. `wrangler.jsonc` declares an **assets-only** Worker — no `main`, so no Worker
+script runs: the platform serves `dist/` directly, answers unknown paths with `index.html`
+(`not_found_handling: "single-page-application"`) so deep links reach the router, and applies
+the response headers in `public/_headers`.
+
+Workers Builds settings:
+
+- **Build command:** `pnpm build`
+- **Deploy command:** `npx wrangler deploy`, Workers Builds' default — it resolves the
+  `wrangler` dev dependency. The `deploy` script is the same command; run it as
+  `pnpm run deploy`, never `pnpm deploy`, which is a pnpm built-in that ignores the script.
+- **Root directory:** the repo root.
+
+Build variables the app reads (set them as **build** variables, not Worker runtime variables
+— the bundle is static, so every value is fixed at build time):
+
+| Variable | Purpose |
+|---|---|
+| `VITE_API_BASE_URL` | the API origin |
+| `VITE_TURNSTILE_SITE_KEY` | Turnstile's public site key; blank renders no widget |
+| `VITE_SENTRY_DSN` | the Bugsink DSN; unset leaves error reporting off |
+| `SENTRY_URL` / `SENTRY_AUTH_TOKEN` / `SENTRY_ORG` / `SENTRY_PROJECT` | the source map upload (above) |
+| `VITE_GIT_SHA` | optional: overrides the release SHA below |
+
+The release SHA needs no variable: Workers Builds sets `WORKERS_CI_COMMIT_SHA` itself.
+
+To check the Worker locally, `task worker:check` builds and dry-runs the deploy, listing the
+assets it would upload. `pnpm exec wrangler dev` (from `task shell`) serves `dist/` the way
+production does.
+
+## Testing
+
+MSW intercepts `fetch` in tests; handlers and fixtures live in `src/test/msw/`. To cover a new endpoint, add a handler + fixture there, then write the test. Component tests use the `renderWithProviders` helper (TanStack Query + AuthProvider + MemoryRouter).
+
+jsdom needs `ResizeObserver` and pointer-capture polyfills for the FilterSheet (Radix Dialog) and other shadcn primitives — both wired in `src/test/setup.ts`.

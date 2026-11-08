@@ -1,0 +1,375 @@
+import { useEffect, useMemo } from "react";
+import { Link } from "react-router";
+import type { MyShowEntry } from "@/api/types";
+import { usePersistedSort } from "@/hooks/usePersistedSort";
+import { usePersistedString } from "@/hooks/usePersistedString";
+import { usePersistedView } from "@/hooks/usePersistedView";
+import { WatchProgressBar } from "@/components/WatchProgressBar";
+import { MyShowCard } from "@/components/MyShowCard";
+import { ShowPoster } from "@/components/ShowPoster";
+import { MuteShowButton } from "@/components/MuteShowButton";
+import { MyShowsButton } from "@/components/MyShowsButton";
+import { ListingToolbar } from "@/components/home/ListingToolbar";
+import {
+  ClearFiltersButton,
+  FilterGroupDivider,
+  GenreFilter,
+  InMyShowsFilterPicker,
+  MyWatchStateFilter,
+  RatedOnlyFilter,
+  ShowStatusFilterPicker,
+  TheirShowsFilterPicker,
+  TheirWatchingFilter,
+  WatchStateFilter,
+} from "@/components/home/FilterPickers";
+import {
+  IN_MY_SHOWS_KEYS,
+  RATED_FILTER_KEYS,
+  SHOW_STATUS_KEYS,
+  WATCH_STATE_KEYS,
+  libraryStatusFor,
+  matchesGenre,
+  matchesStatus,
+  watchStateOf,
+  type InMyShowsFilter,
+  type RatedFilter,
+  type ShowStatusFilter,
+  type WatchState,
+} from "@/components/home/filterTypes";
+import {
+  LIBRARY_SORTS,
+  LIBRARY_SORT_KEYS,
+  compareLibraryEntries,
+  type LibrarySort,
+} from "@/components/home/librarySort";
+import { OwnerFacts } from "@/components/OwnerFacts";
+import { activeCallerRelationship, callerPosterMark, type CallerLibrary } from "./callerLibrary";
+import { matchesCallerMembership, matchesCallerWatchState } from "./callerFilters";
+import { CallerProgressNote } from "./LibraryRowIndicators";
+import { SELF, ratingOwnerFor, type ViewerContext } from "./viewerContext";
+import { activeEmptyMessage } from "./emptyStates";
+
+// On Active tabs the In My Shows filter is inert end-to-end: `In My Shows` is
+// a no-op (every Active row is in My Shows by definition) and `Not in My
+// Shows` would always be empty. Disable the whole picker (NEU-131).
+const IN_MY_SHOWS_DISABLED_REASON = "All Active shows are in My Shows.";
+
+interface Props {
+  data: MyShowEntry[] | undefined;
+  isLoading: boolean;
+  /** Whose library this is. Drives action-button shape and indicator visibility. */
+  viewerContext?: ViewerContext;
+  /** Caller's own library, used by friend mode to drive the action button (NEU-127)
+   * and downstream by my-relationship indicators (NEU-128) and filter (NEU-129). */
+  callerLibrary?: CallerLibrary;
+  /** localStorage key namespace for sort/filter/view persistence. Defaults to
+   * `"my-shows"` so existing self-library prefs keep working. Friend variants
+   * pass e.g. `"friend-active"` so they don't collide. */
+  storagePrefix?: string;
+  /** Fires when the rated-only filter toggles. Self-mode parents can pipe this
+   * back into `useMyShows({ ratedOnly })` so the server-side filter kicks in.
+   * The list also filters client-side on `my_rating`, so omitting this is safe. */
+  onRatedOnlyChange?: (ratedOnly: boolean) => void;
+}
+
+export function LibraryActiveList({
+  data,
+  isLoading,
+  viewerContext = SELF,
+  callerLibrary,
+  storagePrefix = "my-shows",
+  onRatedOnlyChange,
+}: Props) {
+  const [sort, setSort] = usePersistedSort<LibrarySort>(
+    storagePrefix,
+    LIBRARY_SORT_KEYS,
+    "name_asc",
+  );
+  const [watchState, setWatchState] = usePersistedSort<WatchState>(
+    `${storagePrefix}-watch-state`,
+    WATCH_STATE_KEYS,
+    "all",
+  );
+  const [status, setStatus] = usePersistedSort<ShowStatusFilter>(
+    `${storagePrefix}-status`,
+    SHOW_STATUS_KEYS,
+    "all",
+  );
+  const [inMyShows, setInMyShows] = usePersistedSort<InMyShowsFilter>(
+    `${storagePrefix}-in-my-shows`,
+    IN_MY_SHOWS_KEYS,
+    "all",
+  );
+  const [callerMembership, setCallerMembership] = usePersistedSort<InMyShowsFilter>(
+    `${storagePrefix}-caller-membership`,
+    IN_MY_SHOWS_KEYS,
+    "all",
+  );
+  const [callerWatchState, setCallerWatchState] = usePersistedSort<WatchState>(
+    `${storagePrefix}-caller-watch-state`,
+    WATCH_STATE_KEYS,
+    "all",
+  );
+  const [rated, setRated] = usePersistedSort<RatedFilter>(
+    `${storagePrefix}-rated`,
+    RATED_FILTER_KEYS,
+    "all",
+  );
+  const [genre, setGenre] = usePersistedString(`${storagePrefix}-genre`, "all");
+  const [view, setView] = usePersistedView(storagePrefix, "list");
+
+  // Notify the parent so it can pass `ratedOnly` to `useMyShows`. The list
+  // also applies the filter client-side below, so this is purely an
+  // optimization (server-side filter shrinks the payload).
+  useEffect(() => {
+    onRatedOnlyChange?.(rated === "rated");
+  }, [rated, onRatedOnlyChange]);
+
+  const filteredAndSorted = useMemo(() => {
+    if (!data) return data;
+    return data
+      .filter((e) => watchState === "all" || watchStateOf(e) === watchState)
+      .filter((e) => matchesStatus(e.show, status))
+      .filter((e) => matchesGenre(e.show, genre))
+      .filter((e) => matchesCallerMembership(e.show.id, callerMembership, callerLibrary))
+      .filter((e) => matchesCallerWatchState(callerWatchState, e, callerLibrary))
+      .filter((e) => rated === "all" || (e.my_rating != null && e.my_rating > 0))
+      .sort((a, b) => compareLibraryEntries(a, b, sort));
+  }, [
+    data,
+    sort,
+    watchState,
+    status,
+    genre,
+    callerMembership,
+    callerWatchState,
+    callerLibrary,
+    rated,
+  ]);
+
+  const filtersActive =
+    watchState !== "all" ||
+    status !== "all" ||
+    genre !== "all" ||
+    inMyShows !== "all" ||
+    callerMembership !== "all" ||
+    callerWatchState !== "all" ||
+    rated !== "all";
+
+  return (
+    <div>
+      <ListingToolbar
+        view={{ value: view, onChange: setView, ariaLabel: "My Shows display" }}
+        sort={{ label: "My Shows", options: LIBRARY_SORTS, value: sort, onChange: setSort }}
+        filters={
+          <>
+            {viewerContext.kind === "friend" ? (
+              <>
+                <TheirWatchingFilter value={watchState} onChange={setWatchState} />
+                <TheirShowsFilterPicker
+                  value={inMyShows}
+                  onChange={setInMyShows}
+                  // All *their* active shows are in *their* My Shows.
+                  disabledReason={IN_MY_SHOWS_DISABLED_REASON}
+                />
+                <FilterGroupDivider />
+                <InMyShowsFilterPicker value={callerMembership} onChange={setCallerMembership} />
+                <MyWatchStateFilter value={callerWatchState} onChange={setCallerWatchState} />
+                <FilterGroupDivider />
+                <ShowStatusFilterPicker value={status} onChange={setStatus} />
+                <GenreFilter value={genre} onChange={setGenre} />
+              </>
+            ) : (
+              <>
+                <WatchStateFilter value={watchState} onChange={setWatchState} />
+                <ShowStatusFilterPicker value={status} onChange={setStatus} />
+                <InMyShowsFilterPicker
+                  value={inMyShows}
+                  onChange={setInMyShows}
+                  disabledReason={IN_MY_SHOWS_DISABLED_REASON}
+                />
+                <RatedOnlyFilter value={rated} onChange={setRated} />
+                <GenreFilter value={genre} onChange={setGenre} />
+              </>
+            )}
+            {filtersActive && (
+              <ClearFiltersButton
+                onClear={() => {
+                  setWatchState("all");
+                  setStatus("all");
+                  setInMyShows("all");
+                  setCallerMembership("all");
+                  setCallerWatchState("all");
+                  setGenre("all");
+                  setRated("all");
+                }}
+              />
+            )}
+          </>
+        }
+      />
+      <div>
+        {isLoading && <p>Loading…</p>}
+        {!isLoading && filteredAndSorted && filteredAndSorted.length === 0 && (
+          <p className="text-muted-foreground">
+            {activeEmptyMessage(viewerContext, data?.length === 0)}
+          </p>
+        )}
+        {!isLoading && filteredAndSorted && filteredAndSorted.length > 0 && view === "grid" && (
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8">
+            {filteredAndSorted.map((entry) => (
+              <MyShowCard
+                key={entry.show.id}
+                entry={entry}
+                ratingOwner={ratingOwnerFor(viewerContext)}
+                // The same helper the list row asks, so both views ask one
+                // question (NEU-1187 §3.4). It answers `false` for self mode,
+                // where this passed a literal `true` and the mark could only
+                // ever be true — the always-true badge finding 2.3 names.
+                inMyShows={callerPosterMark(entry.show.id, viewerContext, callerLibrary)}
+                // Null in self mode, so the card draws no action row there —
+                // and the friend grid gains the button and the `You: x/y`
+                // comparison its rows have always carried (NEU-1188 AC 3).
+                callerRelationship={activeCallerRelationship(
+                  entry.show.id,
+                  viewerContext,
+                  callerLibrary,
+                )}
+                mutable={viewerContext.kind === "self"}
+              />
+            ))}
+          </div>
+        )}
+        {!isLoading && filteredAndSorted && filteredAndSorted.length > 0 && view === "list" && (
+          <ul className="space-y-3">
+            {filteredAndSorted.map((entry) => (
+              <ActiveRow
+                key={entry.show.id}
+                entry={entry}
+                viewerContext={viewerContext}
+                callerLibrary={callerLibrary}
+              />
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** One Active row.
+ *
+ * **Self mode carries no My Shows control at all** (NEU-1511 §4 D1). Every
+ * row on this tab is in My Shows by definition, so the control could only ever
+ * remove — and a remove-only chip over the poster, which is what NEU-1187 put
+ * here, is what got tapped by mistake on the grid card beside this row. The
+ * poster's corner is empty rather than holding an inert glyph; removing a show
+ * from the viewer's own library is the show page's `MyShowsToggle`, which asks
+ * first. The viewer's own rating sits on the poster's top-right, matching
+ * `MyShowCard` exactly (NEU-1187 §3.4, NEU-1183's last holdout).
+ *
+ * The action row came back in self mode with the push mute toggle (NEU-1495),
+ * which is the one control there that flips both ways and so cannot take a
+ * poster corner. That line is the cost NEU-1187 removed, paid for a control
+ * that genuinely has two states rather than one.
+ *
+ * Friend mode keeps the action row, because adding is possible there: the row
+ * is the friend's, the button reflects the *caller's* relationship, and
+ * clicking it leaves the row standing (it is still on the friend's list).
+ */
+function ActiveRow({
+  entry,
+  viewerContext,
+  callerLibrary,
+}: {
+  entry: MyShowEntry;
+  viewerContext: ViewerContext;
+  callerLibrary?: CallerLibrary;
+}) {
+  const status = libraryStatusFor(entry);
+  const owner = ratingOwnerFor(viewerContext);
+  // The same resolver the grid asks, so both views draw one answer rather than
+  // two derivations of it (NEU-1188).
+  const caller = activeCallerRelationship(entry.show.id, viewerContext, callerLibrary);
+
+  return (
+    <li className="border border-border rounded p-3 flex items-start gap-3 sm:gap-4">
+      {/* Presentational — the show's name below is the row's one link
+        (NEU-1190 §1). No `control`: see the docstring above. */}
+      <ShowPoster
+        src={entry.show.image_medium}
+        size="row"
+        inMyShows={callerPosterMark(entry.show.id, viewerContext, callerLibrary)}
+        // Only the viewer's own rating may occupy a poster corner; a friend's
+        // stays in the group that carries their name (NEU-1182 §3.5).
+        ownRating={owner.kind === "own" ? entry.my_rating : null}
+      />
+      <div className="flex-1 min-w-0 flex flex-col gap-2">
+        <div className="flex items-baseline gap-2 flex-wrap">
+          <Link
+            to={`/shows/${entry.show.id}`}
+            className="font-semibold hover:underline min-w-0 break-words"
+          >
+            {entry.show.name}
+          </Link>
+          {entry.show.premiered && (
+            <span className="text-sm text-muted-foreground">
+              ({entry.show.premiered.slice(0, 4)})
+            </span>
+          )}
+        </div>
+        {status !== "finished" && entry.aired_episode_count > 0 && (
+          <WatchProgressBar
+            watched={entry.watched_episode_count}
+            aired={entry.aired_episode_count}
+            upcoming={entry.upcoming_episode_count}
+            barOnly
+          />
+        )}
+        <OwnerFacts
+          owner={owner}
+          layout="inline"
+          status={status}
+          progress={
+            status === null && entry.aired_episode_count > 0
+              ? { watched: entry.watched_episode_count, aired: entry.aired_episode_count }
+              : null
+          }
+          // `my_rating` is the *row owner's* rating — the friend endpoint
+          // hydrates it for the friend's user id. In self mode it now sits on
+          // the poster above; in friend mode it belongs to the group that
+          // carries their name (NEU-1181 §6.2).
+          rating={owner.kind === "own" ? null : entry.my_rating}
+          lastWatchedAt={entry.last_watched_at}
+        />
+        {status !== "finished" && entry.upcoming_episode_count > 0 && (
+          <p className="text-xs text-muted-foreground">{entry.upcoming_episode_count} upcoming</p>
+        )}
+        {owner.kind === "own" && (
+          // The mute toggle is the one self-mode control that can flip both
+          // ways, so it takes the action row rather than a poster corner
+          // (NEU-1495, NEU-1187 §3.1). Self mode only, on `owner` — the same
+          // guard the card applies — because a friend's entry carries the
+          // friend's flag, not the viewer's.
+          <div className="flex justify-end">
+            <MuteShowButton
+              showId={entry.show.id}
+              showName={entry.show.name}
+              muted={entry.muted ?? false}
+            />
+          </div>
+        )}
+        {caller && (
+          <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+            <CallerProgressNote progress={caller.progress} />
+            <MyShowsButton
+              showId={entry.show.id}
+              showName={entry.show.name}
+              inMyShows={caller.inMyShows}
+            />
+          </div>
+        )}
+      </div>
+    </li>
+  );
+}

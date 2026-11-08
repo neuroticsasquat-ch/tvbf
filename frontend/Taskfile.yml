@@ -1,0 +1,127 @@
+version: '3'
+
+# Traefik, Postgres, Mailpit and the external `proxy` network are the shared
+# tbc-localdev-infra stack; `task infra:up` starts it. Optional, so a checkout
+# without it (CI) still loads every task that doesn't need it.
+includes:
+  infra:
+    taskfile: ~/projects/tbc-localdev-infra/Taskfile.yml
+    dir: ~/projects/tbc-localdev-infra
+    optional: true
+
+vars:
+  COMPOSE: docker compose
+  SVC: tvbf-frontend
+  EXEC: "{{.COMPOSE}} exec {{.SVC}}"
+
+tasks:
+  up:
+    desc: Start the shared infra, then the frontend container
+    cmds:
+      - task: infra:up
+      - "{{.COMPOSE}} up -d"
+
+  down:
+    desc: Stop the frontend container
+    cmds:
+      - "{{.COMPOSE}} down"
+
+  restart:
+    desc: Restart the frontend container
+    cmds:
+      - "{{.COMPOSE}} restart {{.SVC}}"
+
+  build:
+    desc: Rebuild the image, sync deps into the node_modules volume, recreate the container
+    cmds:
+      - "{{.COMPOSE}} build"
+      - "{{.COMPOSE}} run --rm --no-deps {{.SVC}} pnpm install"
+      - "{{.COMPOSE}} up -d"
+
+  logs:
+    desc: Follow frontend logs
+    cmds:
+      - "{{.COMPOSE}} logs -f {{.SVC}}"
+
+  shell:
+    desc: Open a shell inside the frontend container
+    cmds:
+      - "{{.EXEC}} sh"
+
+  ps:
+    desc: Show compose service status
+    cmds:
+      - "{{.COMPOSE}} ps"
+
+  install:
+    desc: Install dependencies inside the container
+    cmds:
+      - "{{.EXEC}} pnpm install"
+
+  test:
+    desc: Run the vitest suite once
+    cmds:
+      - "{{.EXEC}} pnpm test {{.CLI_ARGS}}"
+
+  test:watch:
+    desc: Run vitest in watch mode
+    cmds:
+      - "{{.EXEC}} pnpm test:watch {{.CLI_ARGS}}"
+
+  lint:
+    desc: Run oxlint
+    cmds:
+      - "{{.EXEC}} pnpm lint"
+
+  format:
+    desc: Run prettier --write
+    cmds:
+      - "{{.EXEC}} pnpm format"
+
+  format:check:
+    desc: 'Run prettier --check (task format:check -- <files> to check only those)'
+    cmds:
+      - "{{.EXEC}} pnpm exec prettier --check {{.CLI_ARGS | default \"\\\"src/**/*.{ts,tsx,css,json}\\\"\"}}"
+
+  typecheck:
+    desc: Run tsc --noEmit
+    cmds:
+      - "{{.EXEC}} pnpm typecheck"
+
+  build:app:
+    desc: Run vite build inside the container
+    cmds:
+      - "{{.EXEC}} pnpm build"
+
+  worker:check:
+    desc: Build, then dry-run the Worker deploy (lists the dist assets, uploads nothing)
+    cmds:
+      - "{{.EXEC}} pnpm build"
+      - "{{.EXEC}} pnpm exec wrangler deploy --dry-run"
+
+  deps:add:
+    desc: 'Add a runtime dependency (task deps:add -- <package>)'
+    cmds:
+      - "{{.EXEC}} pnpm add {{.CLI_ARGS}}"
+
+  deps:add-dev:
+    desc: 'Add a dev dependency (task deps:add-dev -- <package>)'
+    cmds:
+      - "{{.EXEC}} pnpm add -D {{.CLI_ARGS}}"
+
+  deps:remove:
+    desc: 'Remove a dependency (task deps:remove -- <package>)'
+    cmds:
+      - "{{.EXEC}} pnpm remove {{.CLI_ARGS}}"
+
+  changelog:
+    desc: 'Update CHANGELOG.md (task changelog -- --tag v2026.05). Runs git-cliff on the host.'
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+      - git-cliff {{.CLI_ARGS}} -o CHANGELOG.md
+
+  changelog:preview:
+    desc: 'Preview unreleased changelog entries since the last tag (no file write)'
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+      - git-cliff --unreleased

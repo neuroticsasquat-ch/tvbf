@@ -1,0 +1,622 @@
+import { beforeEach, describe, expect, it } from "vitest";
+import { screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { http, HttpResponse } from "msw";
+import { env } from "@/env";
+import { server } from "@/test/msw/server";
+import { renderWithProviders } from "@/test/renderWithProviders";
+import type { AnticipatedShow, PopularShow, Recommendation, TrendingShow } from "@/api/types";
+import { DiscoverPage } from "./DiscoverPage";
+
+function makeRecommendation(overrides: Partial<Recommendation> = {}): Recommendation {
+  return {
+    id: 1,
+    name: "Severance",
+    type: null,
+    status: null,
+    language: null,
+    premiered: "2022-02-18",
+    ended: null,
+    image_medium: null,
+    image_original: null,
+    network: null,
+    web_channel: null,
+    genres: [],
+    matched_aka: null,
+    rating_average: null,
+    my_rating: null,
+    rank: 1,
+    ...overrides,
+  };
+}
+
+/** Serve one response and report when the page has actually asked for it, so
+ * the "nothing renders" assertions run after the query settled rather than
+ * against a page that has not fetched yet. */
+function serveRecommendations(respond: () => Response): { called: () => boolean } {
+  let called = false;
+  server.use(
+    http.get(`${env.apiBaseUrl}/me/recommendations`, () => {
+      called = true;
+      return respond();
+    }),
+  );
+  return { called: () => called };
+}
+
+function serveRows(recommendations: Recommendation[]) {
+  return serveRecommendations(() => HttpResponse.json({ recommendations }));
+}
+
+/** The "My Recommendations" panel itself, so assertions stay scoped to it
+ * rather than to the sibling tabs' panels. The heading is `sr-only` — the tab
+ * label carries the visible title — so it is found by role, not by sight. */
+async function findSection(): Promise<HTMLElement> {
+  const heading = await screen.findByRole("heading", { level: 2, name: "My Recommendations" });
+  const section = heading.closest("section");
+  if (!section) throw new Error("the heading is not inside a section");
+  return section;
+}
+
+function makeTrendingShow(overrides: Partial<TrendingShow> = {}): TrendingShow {
+  return {
+    id: 900,
+    name: "Lanterns",
+    type: null,
+    status: "Returning Series",
+    language: "en",
+    premiered: "2026-02-18",
+    ended: null,
+    image_medium: null,
+    image_original: null,
+    network: null,
+    web_channel: null,
+    genres: [],
+    matched_aka: null,
+    rating_average: null,
+    my_rating: null,
+    in_my_shows: false,
+    ...overrides,
+  };
+}
+
+function serveTrending(shows: TrendingShow[]) {
+  server.use(
+    http.get(`${env.apiBaseUrl}/trending`, () =>
+      HttpResponse.json({ captured_at: shows.length ? "2026-08-16T04:00:11.481Z" : null, shows }),
+    ),
+  );
+}
+
+function makeAnticipatedShow(overrides: Partial<AnticipatedShow> = {}): AnticipatedShow {
+  return {
+    id: 800,
+    name: "Neuromancer",
+    type: null,
+    status: "Planned",
+    language: "en",
+    premiered: "2027-02-18",
+    ended: null,
+    image_medium: null,
+    image_original: null,
+    network: null,
+    web_channel: null,
+    genres: [],
+    matched_aka: null,
+    rating_average: null,
+    my_rating: null,
+    in_my_shows: false,
+    ...overrides,
+  };
+}
+
+function serveAnticipated(shows: AnticipatedShow[]) {
+  server.use(http.get(`${env.apiBaseUrl}/anticipated`, () => HttpResponse.json(shows)));
+}
+
+function makePopularShow(overrides: Partial<PopularShow> = {}): PopularShow {
+  return {
+    id: 700,
+    name: "Slow Horses",
+    type: null,
+    status: "Returning Series",
+    language: "en",
+    premiered: "2022-04-01",
+    ended: null,
+    image_medium: null,
+    image_original: null,
+    network: null,
+    web_channel: null,
+    genres: [],
+    matched_aka: null,
+    rating_average: null,
+    my_rating: null,
+    in_my_shows: false,
+    friend_count: 2,
+    ...overrides,
+  };
+}
+
+function servePopular(connectionCount: number, shows: PopularShow[]): { called: () => boolean } {
+  let called = false;
+  server.use(
+    http.get(`${env.apiBaseUrl}/me/friends/popular`, () => {
+      called = true;
+      return HttpResponse.json({ window_days: 14, connection_count: connectionCount, shows });
+    }),
+  );
+  return { called: () => called };
+}
+
+describe("DiscoverPage", () => {
+  // The tab is persisted, and nothing else clears localStorage between tests.
+  beforeEach(() => window.localStorage.clear());
+
+  it("renders the page heading", () => {
+    renderWithProviders(<DiscoverPage />);
+    expect(screen.getByRole("heading", { level: 1, name: "Discover" })).toBeInTheDocument();
+  });
+
+  it("renders the section with a card per recommendation, in the order served", async () => {
+    serveRows([
+      makeRecommendation(),
+      makeRecommendation({
+        id: 2,
+        name: "The Leftovers",
+        premiered: "2014-06-29",
+        rank: 3,
+      }),
+    ]);
+    renderWithProviders(<DiscoverPage />);
+
+    const section = await findSection();
+    const links = within(section).getAllByRole("link");
+    expect(links.map((a) => a.getAttribute("href"))).toEqual(["/shows/1", "/shows/2"]);
+    expect(within(section).getByText("Severance")).toBeInTheDocument();
+    expect(within(section).getByText("The Leftovers")).toBeInTheDocument();
+  });
+
+  it("renders every row the server sent, without slicing", async () => {
+    // The cap is the server's, applied *after* the adult / deleted_upstream_at
+    // filters (NEU-1112 contract §4) — a client that re-sliced to 12 would show
+    // fewer than twelve the first time a tombstone landed.
+    serveRows(
+      Array.from({ length: 13 }, (_, i) =>
+        makeRecommendation({ id: i + 1, name: `Show ${i + 1}`, rank: i + 1 }),
+      ),
+    );
+    renderWithProviders(<DiscoverPage />);
+
+    const section = await findSection();
+    expect(within(section).getAllByRole("link")).toHaveLength(13);
+  });
+
+  it("renders no model-authored prose on the cards", async () => {
+    // `reason` is written and stored server-side but never served (NEU-1112
+    // contract): the card has one truncated 10px line for it, which is not room
+    // for a sentence. A payload that carries one anyway must not render it.
+    serveRows([
+      { ...makeRecommendation(), reason: "<em>Sharp</em> and <b>funny</b>." } as Recommendation,
+    ]);
+    renderWithProviders(<DiscoverPage />);
+
+    await findSection();
+    expect(screen.queryByText("<em>Sharp</em> and <b>funny</b>.")).not.toBeInTheDocument();
+    expect(document.querySelector("em")).toBeNull();
+    expect(document.querySelector("b")).toBeNull();
+  });
+
+  it("renders no section at all when the list is empty", async () => {
+    const request = serveRows([]);
+    renderWithProviders(<DiscoverPage />);
+
+    await waitFor(() => expect(request.called()).toBe(true));
+    expect(screen.getByRole("heading", { level: 1, name: "Discover" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "My Recommendations" })).not.toBeInTheDocument();
+    // The tab goes with the panel: a disabled tab is the empty state with a
+    // smaller footprint (project spec §11).
+    // `waitFor` genuinely waits here rather than passing on the first tick:
+    // the tab *is* rendered while the query is in flight, so this only settles
+    // once the empty answer has landed and the tab has gone.
+    await waitFor(() =>
+      expect(screen.queryByRole("tab", { name: "My Recommendations" })).not.toBeInTheDocument(),
+    );
+    // No empty state, no nudge, no spinner, no error.
+    expect(screen.queryByText(/no shows/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("keeps the tab once it has been shown, even after the list empties", async () => {
+    // A recommendation can now be acted on from the grid, so adding the last
+    // one would otherwise make the tab vanish under the user mid-interaction
+    // and drop them on Trending — their own action reading as an unrequested
+    // navigation (NEU-1176).
+    let call = 0;
+    server.use(
+      http.get(`${env.apiBaseUrl}/me/recommendations`, () => {
+        call += 1;
+        return HttpResponse.json({ recommendations: call === 1 ? [makeRecommendation()] : [] });
+      }),
+      http.put(`${env.apiBaseUrl}/me/shows/1`, () => new HttpResponse(null, { status: 204 })),
+    );
+    renderWithProviders(<DiscoverPage />);
+
+    await screen.findByRole("tab", { name: "My Recommendations" });
+    await userEvent.click(await screen.findByRole("button", { name: /^Add .+ to My Shows$/ }));
+
+    // The list empties; the tab stays, still selected, and the pane says its
+    // one line rather than going blank.
+    await waitFor(() => expect(call).toBeGreaterThan(1));
+    expect(screen.getByRole("tab", { name: "My Recommendations" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(await screen.findByText(/new recommendations on Sunday/i)).toBeInTheDocument();
+  });
+
+  it("keeps saying its line after the user visits another tab and comes back", async () => {
+    // Radix unmounts an inactive `TabsContent`, so a latch held only inside the
+    // panel is lost on a tab switch — and the tab would then stand over a pane
+    // rendering nothing at all, which is the blank the latch exists to prevent.
+    let call = 0;
+    server.use(
+      http.get(`${env.apiBaseUrl}/me/recommendations`, () => {
+        call += 1;
+        return HttpResponse.json({ recommendations: call === 1 ? [makeRecommendation()] : [] });
+      }),
+      http.put(`${env.apiBaseUrl}/me/shows/1`, () => new HttpResponse(null, { status: 204 })),
+    );
+    serveTrending([makeTrendingShow()]);
+    renderWithProviders(<DiscoverPage />);
+
+    await screen.findByRole("tab", { name: "My Recommendations" });
+    await userEvent.click(await screen.findByRole("button", { name: /^Add .+ to My Shows$/ }));
+    expect(await screen.findByText(/new recommendations on Sunday/i)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("tab", { name: "Trending" }));
+    await userEvent.click(screen.getByRole("tab", { name: "My Recommendations" }));
+
+    expect(await screen.findByText(/new recommendations on Sunday/i)).toBeInTheDocument();
+  });
+
+  it("renders no section and no error when the request fails", async () => {
+    const request = serveRecommendations(() =>
+      HttpResponse.json({ detail: "boom" }, { status: 500 }),
+    );
+    renderWithProviders(<DiscoverPage />);
+
+    await waitFor(() => expect(request.called()).toBe(true));
+    expect(screen.getByRole("heading", { level: 1, name: "Discover" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "My Recommendations" })).not.toBeInTheDocument();
+    // `waitFor` genuinely waits here rather than passing on the first tick:
+    // the tab *is* rendered while the query is in flight, so this only settles
+    // once the empty answer has landed and the tab has gone.
+    await waitFor(() =>
+      expect(screen.queryByRole("tab", { name: "My Recommendations" })).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("opens on My Recommendations, ahead of the other tabs", async () => {
+    serveRows([makeRecommendation()]);
+    renderWithProviders(<DiscoverPage />);
+
+    const mine = await screen.findByRole("tab", { name: "My Recommendations" });
+    expect(mine).toHaveAttribute("aria-selected", "true");
+    // First in the strip, not merely present.
+    const labels = screen.getAllByRole("tab").map((t) => t.textContent);
+    expect(labels).toEqual([
+      "My Recommendations",
+      "Trending",
+      "Popular with Friends",
+      "Most Anticipated",
+    ]);
+    expect(await screen.findByRole("link", { name: /Severance/ })).toBeInTheDocument();
+  });
+
+  it("falls back to Trending when the user has no recommendations", async () => {
+    const request = serveRows([]);
+    serveTrending([makeTrendingShow()]);
+    renderWithProviders(<DiscoverPage />);
+
+    await waitFor(() => expect(request.called()).toBe(true));
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: "Trending" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      ),
+    );
+    expect(await screen.findByRole("link", { name: /Lanterns/ })).toBeInTheDocument();
+    // The stored preference is untouched: deferring is a decision for this
+    // visit, not a reason to spend the user's default on one bad Sunday.
+    expect(window.localStorage.getItem("tvbf:str:discover-tab")).toBe("my-recommendations");
+  });
+
+  it("restores the persisted tab", () => {
+    window.localStorage.setItem("tvbf:str:discover-tab", "trending");
+    renderWithProviders(<DiscoverPage />);
+
+    expect(screen.getByRole("tab", { name: "Trending" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("falls back to the default tab when the persisted value names no tab", async () => {
+    // `usePersistedString` does not validate, so a value that outlives the tab
+    // it named must not leave the page with nothing selected.
+    window.localStorage.setItem("tvbf:str:discover-tab", "coming-soon");
+    serveRows([makeRecommendation()]);
+    renderWithProviders(<DiscoverPage />);
+
+    expect(await screen.findByRole("tab", { name: "My Recommendations" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    // Healed, not merely ignored — otherwise the value would come back to life
+    // the day a tab is added by that name.
+    await waitFor(() =>
+      expect(window.localStorage.getItem("tvbf:str:discover-tab")).toBe("my-recommendations"),
+    );
+  });
+
+  it("renders the Most Anticipated tab beside Trending", async () => {
+    const request = serveRows([]);
+    serveTrending([makeTrendingShow()]);
+    serveAnticipated([makeAnticipatedShow()]);
+    renderWithProviders(<DiscoverPage />);
+
+    await waitFor(() => expect(request.called()).toBe(true));
+    expect(screen.getByRole("tab", { name: "Most Anticipated" })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: "Trending" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      ),
+    );
+  });
+
+  it("restores Most Anticipated when it is the persisted tab", async () => {
+    window.localStorage.setItem("tvbf:str:discover-tab", "most-anticipated");
+    serveAnticipated([makeAnticipatedShow({ name: "Neuromancer", premiered: "2027-02-18" })]);
+    renderWithProviders(<DiscoverPage />);
+
+    expect(screen.getByRole("tab", { name: "Most Anticipated" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(await screen.findByRole("link", { name: /Neuromancer/ })).toBeInTheDocument();
+    // The date, not the year: an anticipated list without dates is a
+    // popularity list.
+    expect(screen.getByText("Feb 18, 2027")).toBeInTheDocument();
+  });
+
+  it("persists the tab when the user switches to Most Anticipated", async () => {
+    serveRows([makeRecommendation()]);
+    serveTrending([makeTrendingShow()]);
+    serveAnticipated([makeAnticipatedShow()]);
+    renderWithProviders(<DiscoverPage />);
+
+    await userEvent.click(screen.getByRole("tab", { name: "Most Anticipated" }));
+
+    await waitFor(() =>
+      expect(window.localStorage.getItem("tvbf:str:discover-tab")).toBe("most-anticipated"),
+    );
+    expect(await screen.findByRole("link", { name: /Neuromancer/ })).toBeInTheDocument();
+  });
+
+  it("renders the tab with no content, and no error, when most anticipated is empty", async () => {
+    window.localStorage.setItem("tvbf:str:discover-tab", "most-anticipated");
+    let called = false;
+    server.use(
+      http.get(`${env.apiBaseUrl}/anticipated`, () => {
+        called = true;
+        return HttpResponse.json([]);
+      }),
+    );
+    renderWithProviders(<DiscoverPage />);
+
+    await waitFor(() => expect(called).toBe(true));
+    expect(screen.getByRole("tab", { name: "Most Anticipated" })).toBeInTheDocument();
+    expect(screen.queryByText(/no shows/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("renders the tab with no content, and no error, when trending is empty", async () => {
+    let called = false;
+    server.use(
+      http.get(`${env.apiBaseUrl}/trending`, () => {
+        called = true;
+        return HttpResponse.json({ captured_at: null, shows: [] });
+      }),
+    );
+    renderWithProviders(<DiscoverPage />);
+
+    await waitFor(() => expect(called).toBe(true));
+    expect(screen.getByRole("tab", { name: "Trending" })).toBeInTheDocument();
+    expect(screen.queryByText(/stale/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/no shows/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  describe("the picker below md", () => {
+    // jsdom applies no media queries, so the tab row and the picker are both
+    // in the DOM here; these assert what the picker does, not when it shows.
+    const trigger = () => screen.getByRole("button", { name: /^Discover section: / });
+
+    async function openSheet(): Promise<HTMLElement> {
+      await userEvent.click(trigger());
+      return screen.findByRole("dialog", { name: "Discover" });
+    }
+
+    function optionLabels(sheet: HTMLElement): (string | null)[] {
+      return within(sheet)
+        .getAllByRole("button")
+        .map((b) => b.textContent);
+    }
+
+    function tabLabels(): (string | null)[] {
+      return screen.getAllByRole("tab").map((t) => t.textContent);
+    }
+
+    it("lists every tab the row does, in the same order, with recommendations", async () => {
+      serveRows([makeRecommendation()]);
+      renderWithProviders(<DiscoverPage />);
+
+      await screen.findByRole("link", { name: /Severance/ });
+      // Read before opening: the modal sheet hides the rest of the page from
+      // the accessibility tree, tab row included.
+      const row = tabLabels();
+      const sheet = await openSheet();
+      expect(optionLabels(sheet)).toEqual([
+        "My Recommendations",
+        "Trending",
+        "Popular with Friends",
+        "Most Anticipated",
+      ]);
+      expect(optionLabels(sheet)).toEqual(row);
+    });
+
+    it("drops My Recommendations exactly when the row does", async () => {
+      const request = serveRows([]);
+      serveTrending([makeTrendingShow()]);
+      renderWithProviders(<DiscoverPage />);
+
+      await waitFor(() => expect(request.called()).toBe(true));
+      await waitFor(() =>
+        expect(screen.queryByRole("tab", { name: "My Recommendations" })).not.toBeInTheDocument(),
+      );
+      // Read before opening: the modal sheet hides the rest of the page from
+      // the accessibility tree, tab row included.
+      const row = tabLabels();
+      const sheet = await openSheet();
+      expect(optionLabels(sheet)).toEqual(["Trending", "Popular with Friends", "Most Anticipated"]);
+      expect(optionLabels(sheet)).toEqual(row);
+    });
+
+    it("keeps My Recommendations while the row's latch does", async () => {
+      let call = 0;
+      server.use(
+        http.get(`${env.apiBaseUrl}/me/recommendations`, () => {
+          call += 1;
+          return HttpResponse.json({ recommendations: call === 1 ? [makeRecommendation()] : [] });
+        }),
+        http.put(`${env.apiBaseUrl}/me/shows/1`, () => new HttpResponse(null, { status: 204 })),
+      );
+      renderWithProviders(<DiscoverPage />);
+
+      await userEvent.click(await screen.findByRole("button", { name: /^Add .+ to My Shows$/ }));
+      expect(await screen.findByText(/new recommendations on Sunday/i)).toBeInTheDocument();
+
+      const row = tabLabels();
+      expect(row).toContain("My Recommendations");
+      const sheet = await openSheet();
+      expect(optionLabels(sheet)).toEqual(row);
+    });
+
+    it("switches the panel and persists the choice, then closes", async () => {
+      serveRows([makeRecommendation()]);
+      servePopular(3, [makePopularShow()]);
+      renderWithProviders(<DiscoverPage />);
+
+      await screen.findByRole("link", { name: /Severance/ });
+      const sheet = await openSheet();
+      await userEvent.click(within(sheet).getByRole("button", { name: "Popular with Friends" }));
+
+      expect(screen.queryByRole("dialog", { name: "Discover" })).not.toBeInTheDocument();
+      expect(await screen.findByRole("link", { name: /Slow Horses/ })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Popular with Friends" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+      await waitFor(() =>
+        expect(window.localStorage.getItem("tvbf:str:discover-tab")).toBe("popular-with-friends"),
+      );
+    });
+
+    it("names the active tab, including after a switch made through the row", async () => {
+      window.localStorage.setItem("tvbf:str:discover-tab", "trending");
+      serveAnticipated([makeAnticipatedShow()]);
+      renderWithProviders(<DiscoverPage />);
+
+      expect(trigger()).toHaveAccessibleName("Discover section: Trending");
+      expect(trigger()).toHaveTextContent("Trending");
+
+      await userEvent.click(screen.getByRole("tab", { name: "Most Anticipated" }));
+
+      expect(trigger()).toHaveAccessibleName("Discover section: Most Anticipated");
+      expect(trigger()).toHaveTextContent("Most Anticipated");
+      const sheet = await openSheet();
+      // The check sits on the active option only.
+      const checked = within(sheet)
+        .getAllByRole("button")
+        .filter((b) => b.querySelector("svg"))
+        .map((b) => b.textContent);
+      expect(checked).toEqual(["Most Anticipated"]);
+    });
+  });
+
+  describe("Popular with Friends", () => {
+    // The tab is always present, unlike My Recommendations: its empty states
+    // are the point (project spec §6.1). Each case below asserts the trigger
+    // sits between Trending and Most Anticipated whatever the body.
+    function expectTabInPlace() {
+      const labels = screen.getAllByRole("tab").map((t) => t.textContent);
+      const at = labels.indexOf("Popular with Friends");
+      expect(labels[at - 1]).toBe("Trending");
+      expect(labels[at + 1]).toBe("Most Anticipated");
+    }
+
+    it("is present before any data has arrived", () => {
+      server.use(http.get(`${env.apiBaseUrl}/me/friends/popular`, () => new Promise(() => {})));
+      renderWithProviders(<DiscoverPage />);
+
+      expectTabInPlace();
+    });
+
+    it("is present, and renders the grid, with data", async () => {
+      window.localStorage.setItem("tvbf:str:discover-tab", "popular-with-friends");
+      servePopular(3, [makePopularShow()]);
+      renderWithProviders(<DiscoverPage />);
+
+      expect(screen.getByRole("tab", { name: "Popular with Friends" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+      expect(await screen.findByRole("link", { name: /Slow Horses/ })).toBeInTheDocument();
+      expectTabInPlace();
+    });
+
+    it("is present with the connect prompt for a viewer with no connections", async () => {
+      window.localStorage.setItem("tvbf:str:discover-tab", "popular-with-friends");
+      servePopular(0, []);
+      renderWithProviders(<DiscoverPage />);
+
+      expect(await screen.findByRole("link", { name: "Connect with friends" })).toHaveAttribute(
+        "href",
+        "/friends",
+      );
+      expectTabInPlace();
+    });
+
+    it("is present with the quiet line when friends have done nothing lately", async () => {
+      window.localStorage.setItem("tvbf:str:discover-tab", "popular-with-friends");
+      servePopular(2, []);
+      renderWithProviders(<DiscoverPage />);
+
+      expect(
+        await screen.findByText("Nothing from your friends in the last two weeks."),
+      ).toBeInTheDocument();
+      expectTabInPlace();
+    });
+
+    it("persists the tab when the user switches to it", async () => {
+      servePopular(3, [makePopularShow()]);
+      renderWithProviders(<DiscoverPage />);
+
+      await userEvent.click(screen.getByRole("tab", { name: "Popular with Friends" }));
+
+      await waitFor(() =>
+        expect(window.localStorage.getItem("tvbf:str:discover-tab")).toBe("popular-with-friends"),
+      );
+      expect(await screen.findByRole("link", { name: /Slow Horses/ })).toBeInTheDocument();
+    });
+  });
+});

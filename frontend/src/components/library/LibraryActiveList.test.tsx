@@ -1,0 +1,388 @@
+import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { http, HttpResponse } from "msw";
+import { beforeEach, describe, expect, it } from "vitest";
+
+import type { MyShowEntry, ShowSummary } from "@/api/types";
+import { env } from "@/env";
+import { server } from "@/test/msw/server";
+import { useMyShows, useRecommendations } from "@/api/me";
+import { renderWithProviders } from "@/test/renderWithProviders";
+import { LibraryActiveList } from "./LibraryActiveList";
+import type { CallerLibrary } from "./callerLibrary";
+import { SELF, type ViewerContext } from "./viewerContext";
+
+const JEANNE: ViewerContext = { kind: "friend", name: "Jeanne" };
+
+function makeShow(overrides: Partial<ShowSummary> = {}): ShowSummary {
+  return {
+    id: 1,
+    name: "The Bear",
+    type: null,
+    status: "Returning Series",
+    language: null,
+    premiered: "2022-06-23",
+    ended: null,
+    image_medium: null,
+    image_original: null,
+    network: null,
+    web_channel: null,
+    genres: [],
+    matched_aka: null,
+    rating_average: null,
+    my_rating: null,
+    ...overrides,
+  };
+}
+
+/** One entry as the *friend* endpoint hydrates it: `my_rating` and the watched
+ * counts are the friend's, for the friend's user id (`routers/users.py:82`). */
+function makeEntry(overrides: Partial<MyShowEntry> = {}): MyShowEntry {
+  return {
+    show: makeShow(),
+    watched_episode_count: 38,
+    total_episode_count: 46,
+    aired_episode_count: 46,
+    upcoming_episode_count: 0,
+    last_aired: null,
+    last_watched_at: null,
+    first_watched_at: null,
+    next_episode: null,
+    added_at: "2026-01-01T00:00:00Z",
+    my_rating: 4,
+    ...overrides,
+  };
+}
+
+/** The caller's own relationship to the same show: fewer episodes watched, and
+ * — the case the bug was reproduced on — a different rating of their own. */
+const callerLibrary: CallerLibrary = new Map([
+  [1, { in_my_shows: true, watched_episode_count: 12, aired_episode_count: 46 }],
+]);
+
+function setView(prefix: string, view: "list" | "grid") {
+  window.localStorage.setItem(`tvbf:view:${prefix}`, view);
+}
+
+describe("LibraryActiveList ownership", () => {
+  beforeEach(() => window.localStorage.clear());
+
+  for (const view of ["list", "grid"] as const) {
+    it(`does not label a friend's rating as the caller's in ${view} view`, () => {
+      // NEU-1181 AC 1/2/6. `my_rating` here is 4.0 and belongs to Jeanne; the
+      // caller's own rating for the same show is a different number they can
+      // see on their own My Shows.
+      setView("friend-active", view);
+      renderWithProviders(
+        <LibraryActiveList
+          data={[makeEntry()]}
+          isLoading={false}
+          viewerContext={JEANNE}
+          callerLibrary={callerLibrary}
+          storagePrefix="friend-active"
+        />,
+      );
+
+      expect(
+        screen.getByRole("img", { name: "Jeanne's rating: 4.0 out of 5" }),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("img", { name: /^your rating/i })).not.toBeInTheDocument();
+    });
+
+    it(`attributes the friend's progress in ${view} view`, () => {
+      // AC 3, satisfied by grouping the friend's facts under their name rather
+      // than by the layout the ticket sketched (spec §6.4).
+      setView("friend-active", view);
+      renderWithProviders(
+        <LibraryActiveList
+          data={[makeEntry()]}
+          isLoading={false}
+          viewerContext={JEANNE}
+          callerLibrary={callerLibrary}
+          storagePrefix="friend-active"
+        />,
+      );
+
+      expect(screen.getByText("Jeanne's progress: 38 of 46")).toBeInTheDocument();
+      expect(screen.getAllByText("Jeanne:")).toHaveLength(1);
+    });
+  }
+
+  it("keeps the caller's own comparison labelled as theirs", () => {
+    renderWithProviders(
+      <LibraryActiveList
+        data={[makeEntry()]}
+        isLoading={false}
+        viewerContext={JEANNE}
+        callerLibrary={callerLibrary}
+        storagePrefix="friend-active"
+      />,
+    );
+    expect(screen.getByText("You: 12/46")).toBeInTheDocument();
+  });
+
+  it("says whose library the mark refers to, on a page that is not yours", () => {
+    // AC 4: the mark is the *viewer's* library on every surface, so its label
+    // is unconditional rather than context-dependent.
+    renderWithProviders(
+      <LibraryActiveList
+        data={[makeEntry()]}
+        isLoading={false}
+        viewerContext={JEANNE}
+        callerLibrary={callerLibrary}
+        storagePrefix="friend-active"
+      />,
+    );
+    expect(screen.getByRole("img", { name: "In your My Shows" })).toBeInTheDocument();
+  });
+
+  it("labels the viewer's own rating as theirs on their own library", () => {
+    // NEU-1181 AC 5: same label. Its *place* moved to the poster's top-right
+    // in NEU-1187 §3.4, which the assertion below is deliberately silent about
+    // — the corner is `ShowPoster.test.tsx`'s to assert.
+    renderWithProviders(<LibraryActiveList data={[makeEntry()]} isLoading={false} />);
+    expect(screen.getByRole("img", { name: "Your rating: 4.0 out of 5" })).toBeInTheDocument();
+    expect(screen.getByText("Progress: 38/46")).toBeInTheDocument();
+    expect(screen.queryByText(/Jeanne/)).not.toBeInTheDocument();
+  });
+
+  it("draws its row poster through ShowPoster rather than hand-rolling one", () => {
+    // NEU-1183 AC 1: the mark sat top-right on a library row and top-left on a
+    // Discover card. It is one corner now — asserted once, in
+    // `ShowPoster.test.tsx`, and inherited here rather than restated.
+    const { container } = renderWithProviders(
+      <LibraryActiveList
+        data={[makeEntry()]}
+        isLoading={false}
+        viewerContext={JEANNE}
+        callerLibrary={callerLibrary}
+        storagePrefix="friend-active"
+      />,
+    );
+    expect(container.querySelector("[data-show-poster]")).not.toBeNull();
+    expect(screen.getByRole("img", { name: "In your My Shows" })).toBeInTheDocument();
+  });
+
+  it("defaults to self mode", () => {
+    renderWithProviders(<LibraryActiveList data={[makeEntry()]} isLoading={false} />);
+    expect(SELF.kind).toBe("self");
+    expect(screen.queryByText("You: 12/46")).not.toBeInTheDocument();
+  });
+});
+
+describe("LibraryActiveList self-mode controls (NEU-1187)", () => {
+  beforeEach(() => window.localStorage.clear());
+
+  for (const view of ["list", "grid"] as const) {
+    it(`carries no removal control and no library mark in ${view} view`, () => {
+      // NEU-1511 AC 1. Every row on this tab is in My Shows by definition, so a
+      // control could only remove, and the remove-only chip NEU-1187 put over
+      // the poster is what got tapped by mistake. The corner is empty; the
+      // mark could only be true, so it stays gone too.
+      setView("my-shows", view);
+      const { container } = renderWithProviders(
+        <LibraryActiveList data={[makeEntry()]} isLoading={false} />,
+      );
+
+      expect(screen.queryByRole("button", { name: /from My Shows$/ })).not.toBeInTheDocument();
+      expect(container.querySelector("[data-show-poster] button")).toBeNull();
+      // No labelled chip either: it is the only control with visible text.
+      expect(screen.queryByText("My Shows")).not.toBeInTheDocument();
+      expect(screen.queryByRole("img", { name: "In your My Shows" })).not.toBeInTheDocument();
+    });
+  }
+
+  it("puts the viewer's own rating on the row poster, not in an action row", () => {
+    // AC 4's other half (§2.4): stripping the button alone leaves a rated row
+    // its `RatingBadge` line and its height. NEU-1183's last holdout.
+    const { container } = renderWithProviders(
+      <LibraryActiveList data={[makeEntry()]} isLoading={false} />,
+    );
+    const poster = container.querySelector("[data-show-poster]");
+    const badge = screen.getByRole("img", { name: "Your rating: 4.0 out of 5" });
+    expect(poster?.contains(badge)).toBe(true);
+  });
+
+  it("keeps the friend row's labelled button and its action row", () => {
+    // Adding is possible on a friend's library, so the control stays labelled
+    // and stays in the action row (§3.6).
+    renderWithProviders(
+      <LibraryActiveList
+        data={[makeEntry()]}
+        isLoading={false}
+        viewerContext={JEANNE}
+        callerLibrary={callerLibrary}
+        storagePrefix="friend-active"
+      />,
+    );
+    const button = screen.getByRole("button", { name: "Remove The Bear from My Shows" });
+    expect(button).toHaveTextContent("My Shows");
+    expect(button.closest("[data-show-poster]")).toBeNull();
+  });
+});
+
+describe("LibraryActiveList push mute (NEU-1495)", () => {
+  beforeEach(() => window.localStorage.clear());
+
+  for (const view of ["list", "grid"] as const) {
+    it(`draws the mute toggle outside the poster on the viewer's own library in ${view} view`, () => {
+      setView("my-shows", view);
+      const { container } = renderWithProviders(
+        <LibraryActiveList data={[makeEntry({ muted: true })]} isLoading={false} />,
+      );
+      const toggle = screen.getByRole("button", { name: "Unmute notifications for The Bear" });
+      expect(container.querySelector("[data-show-poster]")?.contains(toggle)).toBe(false);
+    });
+
+    it(`draws no mute toggle on a friend's library in ${view} view`, () => {
+      // Spec §6.5: honoured only when the rating owner is the viewer.
+      setView("friend-active", view);
+      renderWithProviders(
+        <LibraryActiveList
+          data={[makeEntry()]}
+          isLoading={false}
+          viewerContext={JEANNE}
+          callerLibrary={callerLibrary}
+          storagePrefix="friend-active"
+        />,
+      );
+      expect(screen.queryByRole("button", { name: /notifications for/ })).not.toBeInTheDocument();
+    });
+  }
+
+  /** The list fed by `useMyShows()`, so the optimistic patch to `["my-shows"]`
+   * is what the row reads — not the button's own override alone. */
+  function Harness() {
+    const { data, isLoading } = useMyShows();
+    useRecommendations();
+    return <LibraryActiveList data={data} isLoading={isLoading} />;
+  }
+
+  it("patches the My Shows cache optimistically and rolls it back on failure", async () => {
+    // The cache, not the button: `MuteShowButton` also resets its own override
+    // on error, so asserting on the button alone passes with no cache rollback.
+    // The settle refetch is held open, so the snapshot restore in `useMuteShow`
+    // is the only thing that can put `muted` back.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let showFetches = 0;
+    server.use(
+      http.get(`${env.apiBaseUrl}/me/shows`, async () => {
+        showFetches += 1;
+        if (showFetches > 1) await new Promise(() => {});
+        return HttpResponse.json([makeEntry({ muted: false })]);
+      }),
+      http.patch(`${env.apiBaseUrl}/me/shows/1/mute`, async () => {
+        await gate;
+        return HttpResponse.json({ detail: "boom" }, { status: 500 });
+      }),
+    );
+    function CacheProbe() {
+      const { data, isLoading } = useMyShows();
+      return (
+        <>
+          <output data-testid="cached-muted">{String(data?.[0]?.muted)}</output>
+          <LibraryActiveList data={data} isLoading={isLoading} />
+        </>
+      );
+    }
+    renderWithProviders(<CacheProbe />);
+    const cached = () => screen.getByTestId("cached-muted");
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Mute notifications for The Bear" }),
+    );
+    expect(cached()).toHaveTextContent("true");
+
+    release();
+    await waitFor(() => expect(showFetches).toBe(2));
+    await waitFor(() => expect(cached()).toHaveTextContent("false"));
+  });
+
+  it("does not refetch recommendations, since a mute is not a never-recommend source", async () => {
+    let recommendationFetches = 0;
+    let showFetches = 0;
+    server.use(
+      http.get(`${env.apiBaseUrl}/me/shows`, () => {
+        showFetches += 1;
+        return HttpResponse.json([makeEntry({ muted: false })]);
+      }),
+      http.get(`${env.apiBaseUrl}/me/recommendations`, () => {
+        recommendationFetches += 1;
+        return HttpResponse.json({ recommendations: [] });
+      }),
+    );
+    renderWithProviders(<Harness />);
+    await waitFor(() => expect(recommendationFetches).toBe(1));
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Mute notifications for The Bear" }),
+    );
+
+    // `["my-shows"]` is refetched on settle; that refetch is the signal the
+    // mutation has finished, after which recommendations must still be at one.
+    await waitFor(() => expect(showFetches).toBe(2));
+    expect(recommendationFetches).toBe(1);
+  });
+});
+
+describe("LibraryActiveList empty states (NEU-1190 §2)", () => {
+  beforeEach(() => window.localStorage.clear());
+
+  it("says the viewer tracks nothing when their own library is empty", () => {
+    // AC 4. This read "No shows match the current filters." with every picker
+    // on "All" — the one list of six that never split the two states.
+    renderWithProviders(<LibraryActiveList data={[]} isLoading={false} />);
+    expect(screen.getByText("You're not tracking any shows yet.")).toBeInTheDocument();
+  });
+
+  it("names the friend when their library is empty", () => {
+    renderWithProviders(
+      <LibraryActiveList
+        data={[]}
+        isLoading={false}
+        viewerContext={JEANNE}
+        storagePrefix="friend-active"
+      />,
+    );
+    expect(screen.getByText("Jeanne isn't tracking any shows.")).toBeInTheDocument();
+  });
+
+  for (const [label, prefix, props] of [
+    ["self", "my-shows", {}],
+    ["a friend's", "friend-active", { viewerContext: JEANNE, storagePrefix: "friend-active" }],
+  ] as const) {
+    it(`still says so distinctly when filters exclude everything on ${label} library`, () => {
+      // AC 5. The filters are the viewer's own in both modes, so this sentence
+      // claims nothing about whose library it is and needs no attribution.
+      // The filter is set through the persisted state the pickers write, which
+      // is what makes the assertion about the message rather than about the
+      // picker's option list.
+      window.localStorage.setItem(`tvbf:sort:${prefix}-status`, "ended");
+      renderWithProviders(<LibraryActiveList data={[makeEntry()]} isLoading={false} {...props} />);
+
+      expect(screen.getByText("No shows match the current filters.")).toBeInTheDocument();
+    });
+  }
+});
+
+describe("LibraryActiveList row links (NEU-1190 §1)", () => {
+  beforeEach(() => window.localStorage.clear());
+
+  it("exposes exactly one link per row, and it is the show's name", () => {
+    // AC 1. The poster and the title were two links to `/shows/1`, identically
+    // named.
+    renderWithProviders(<LibraryActiveList data={[makeEntry()]} isLoading={false} />);
+    const links = screen.getAllByRole("link");
+    expect(links).toHaveLength(1);
+    expect(links[0]).toHaveAttribute("href", "/shows/1");
+    expect(links[0]).toHaveTextContent("The Bear");
+  });
+
+  it("keeps the poster's rating badge announced", () => {
+    // The reason the poster drops its link rather than being `aria-hidden`
+    // (§1.3).
+    renderWithProviders(<LibraryActiveList data={[makeEntry()]} isLoading={false} />);
+    expect(screen.getByRole("img", { name: "Your rating: 4.0 out of 5" })).toBeInTheDocument();
+  });
+});

@@ -1,0 +1,492 @@
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { Link, NavLink, Outlet, useLocation } from "react-router";
+import {
+  PlayCircle as WatchNextIcon,
+  Calendar as CalendarIcon,
+  Compass as DiscoverIcon,
+  Library as MyShowsIcon,
+  Loader2 as SpinnerIcon,
+  Users as FriendsIcon,
+  Search as SearchIcon,
+} from "lucide-react";
+import { useAuth } from "./AuthContext";
+import { useIncomingRequestCount } from "@/api/incomingRequests";
+import { UserMenu } from "./UserMenu";
+import { ChangePasswordDialog } from "./ChangePasswordDialog";
+import { DeleteAccountDialog } from "./DeleteAccountDialog";
+import { FeedbackDialog } from "./feedback/FeedbackDialog";
+import { SearchOverlay } from "./SearchOverlay";
+import { SasquatchMark } from "./SasquatchMark";
+import { BrandLockup } from "./BrandLockup";
+import { UnverifiedEmailBanner } from "./UnverifiedEmailBanner";
+import { PushNudgeCard } from "./push/PushNudgeCard";
+import { clearPushNudge } from "@/lib/pushNudge";
+import { cn } from "@/lib/cn";
+
+type Placement = "desktop" | "mobile-header" | "mobile-bottom";
+
+// Read once at module load: a clock read during render is impure (oxlint's
+// react purity rule), and a footer year that lags a tab left open over New
+// Year until the next reload is harmless.
+const COPYRIGHT_YEAR = new Date().getFullYear();
+
+export function AppShell() {
+  const { user } = useAuth();
+  const incomingRequestCount = useIncomingRequestCount(!!user);
+  const location = useLocation();
+  const [pwOpen, setPwOpen] = useState(false);
+  const [delOpen, setDelOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [searchInput, setSearchInput] = useState("");
+  // Reported up by `SearchOverlay`, which owns the debounce and both queries
+  // and so is the only place that knows when a search is running (NEU-1502).
+  const [searchBusy, setSearchBusy] = useState(false);
+  const searchFormRef = useRef<HTMLFormElement>(null);
+  const overlayRef = useRef<HTMLElement>(null);
+
+  // Clear search overlay whenever the user navigates anywhere.
+  const [prevLocationKey, setPrevLocationKey] = useState(location.key);
+  if (prevLocationKey !== location.key) {
+    setPrevLocationKey(location.key);
+    setSearchInput("");
+  }
+
+  // The nudge belongs to the page the add happened on; leaving it closes the
+  // card (for good — it was recorded as seen when it appeared).
+  useEffect(() => clearPushNudge(), [location.key]);
+
+  const overlayActive = !!user && searchInput.trim().length > 0;
+
+  // Hide the mobile bottom nav while a text input is focused. On iOS Safari
+  // the layout viewport doesn't shrink for the keyboard, so a fixed-bottom
+  // nav otherwise floats above the keyboard with a transparent strip of
+  // Safari chrome between them.
+  const [inputFocused, setInputFocused] = useState(false);
+  useEffect(() => {
+    function isTextInput(t: EventTarget | null): boolean {
+      if (!(t instanceof HTMLElement)) return false;
+      if (t.isContentEditable) return true;
+      if (t.tagName === "TEXTAREA") return true;
+      if (t.tagName === "INPUT") {
+        const type = (t as HTMLInputElement).type;
+        return type !== "checkbox" && type !== "radio" && type !== "button" && type !== "submit";
+      }
+      return false;
+    }
+    const onFocusIn = (e: FocusEvent) => {
+      if (isTextInput(e.target)) setInputFocused(true);
+    };
+    const onFocusOut = () => setInputFocused(false);
+    document.addEventListener("focusin", onFocusIn);
+    document.addEventListener("focusout", onFocusOut);
+    return () => {
+      document.removeEventListener("focusin", onFocusIn);
+      document.removeEventListener("focusout", onFocusOut);
+    };
+  }, []);
+
+  // Click outside the search box or overlay clears the input.
+  useEffect(() => {
+    if (!overlayActive) return;
+    function onPointerDown(e: PointerEvent) {
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (searchFormRef.current?.contains(target)) return;
+      if (overlayRef.current?.contains(target)) return;
+      // Radix Dialog content (FilterSheet) renders into a portal, so its DOM
+      // sits outside the overlay's subtree. Treat any open dialog as inside-the-overlay
+      // for dismiss purposes.
+      if (target instanceof Element && target.closest('[role="dialog"][data-state="open"]')) return;
+      setSearchInput("");
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [overlayActive]);
+
+  const onWatchNext = location.pathname === "/";
+
+  const handleWatchNextClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (onWatchNext) {
+        e.preventDefault();
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    },
+    [onWatchNext],
+  );
+
+  const linkCls = (placement: Placement) =>
+    placement === "mobile-bottom"
+      ? "flex flex-col items-center justify-center flex-1 min-w-0 py-2 text-xs gap-0.5"
+      : placement === "mobile-header"
+        ? "inline-flex items-center justify-center h-9 w-9 rounded hover:bg-accent"
+        : "inline-flex items-center h-9 px-3 rounded hover:bg-accent gap-1.5 text-sm";
+  const activeCls = (placement: Placement) =>
+    placement === "mobile-bottom" ? "text-foreground" : "text-foreground bg-accent";
+  const inactiveCls = "text-muted-foreground hover:text-foreground";
+
+  // Labels everywhere except the mobile header, whose slots are 9x9 icon
+  // buttons. Note the bottom bar is *labelled*, not icon-only — NEU-1113's spec
+  // and the M5 milestone both describe it as icon-only, which was never true of
+  // this code. Measured in Chrome at the fifth item's landing (NEU-1113): five
+  // slots fit with no horizontal overflow down to 320px CSS, all five cells
+  // keeping equal height. At 375px and up every label sits on one line; below
+  // ~340px "Watch Next" wraps to two and the bar grows 55px -> 71px, which is
+  // the whole cost of the fifth item. Dropping the labels to buy that back
+  // would cost every mobile user legibility on all five, so it was declined.
+  const showLabel = (placement: Placement) => placement !== "mobile-header";
+  const userMenuVariant = (placement: Placement) =>
+    placement === "mobile-bottom"
+      ? "bottom-tab"
+      : placement === "mobile-header"
+        ? "icon-only"
+        : "icon";
+
+  const primaryLinks = (placement: Placement) => (
+    <>
+      <NavLink
+        to="/"
+        end
+        onClick={handleWatchNextClick}
+        className={({ isActive }) =>
+          cn(linkCls(placement), isActive ? activeCls(placement) : inactiveCls)
+        }
+        aria-label="Watch Next"
+      >
+        <WatchNextIcon className="h-5 w-5" aria-hidden />
+        {showLabel(placement) && <span>Watch Next</span>}
+      </NavLink>
+      <NavLink
+        to="/upcoming"
+        className={({ isActive }) =>
+          cn(linkCls(placement), isActive ? activeCls(placement) : inactiveCls)
+        }
+        aria-label="Upcoming"
+      >
+        <CalendarIcon className="h-5 w-5" aria-hidden />
+        {showLabel(placement) && <span>Upcoming</span>}
+      </NavLink>
+      <NavLink
+        to="/discover"
+        className={({ isActive }) =>
+          cn(linkCls(placement), isActive ? activeCls(placement) : inactiveCls)
+        }
+        aria-label="Discover"
+      >
+        <DiscoverIcon className="h-5 w-5" aria-hidden />
+        {showLabel(placement) && <span>Discover</span>}
+      </NavLink>
+      <NavLink
+        to="/my-shows"
+        className={({ isActive }) =>
+          cn(linkCls(placement), isActive ? activeCls(placement) : inactiveCls)
+        }
+        aria-label="My Shows"
+      >
+        <MyShowsIcon className="h-5 w-5" aria-hidden />
+        {showLabel(placement) && <span>My Shows</span>}
+      </NavLink>
+      <NavLink
+        to="/friends"
+        className={({ isActive }) =>
+          cn(linkCls(placement), isActive ? activeCls(placement) : inactiveCls, "relative")
+        }
+        aria-label={
+          incomingRequestCount > 0
+            ? `Friends (${incomingRequestCount} pending request${incomingRequestCount === 1 ? "" : "s"})`
+            : "Friends"
+        }
+      >
+        <span className="relative inline-flex">
+          <FriendsIcon className="h-5 w-5" aria-hidden />
+          {incomingRequestCount > 0 && (
+            <span
+              aria-hidden
+              className="absolute -top-1 -right-1 inline-flex h-2 w-2 rounded-full bg-red-500"
+            />
+          )}
+        </span>
+        {showLabel(placement) && <span>Friends</span>}
+      </NavLink>
+    </>
+  );
+
+  const utilityLinks = (placement: Placement) => (
+    <>
+      <UserMenu
+        onChangePassword={() => setPwOpen(true)}
+        onDeleteAccount={() => setDelOpen(true)}
+        onSendFeedback={() => setFeedbackOpen(true)}
+        variant={userMenuVariant(placement)}
+      />
+    </>
+  );
+
+  return (
+    // pb reserves space at the document bottom on mobile so the fixed bottom
+    // nav — which grows by the home-indicator inset — doesn't visually cover
+    // the footer. Removed at md+.
+    <div
+      className={cn(
+        "flex min-h-screen flex-col overflow-x-hidden",
+        user && "pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-0",
+      )}
+    >
+      {/* The top inset clears the iOS status bar in a standalone launch (NEU-1482). */}
+      <header className="sticky top-0 z-30 border-b border-border bg-background pt-[env(safe-area-inset-top)]">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-3 px-4 py-3">
+          <Link
+            to="/"
+            className="inline-flex shrink-0 items-center"
+            aria-label="TV BingeFriend home"
+          >
+            <BrandLockup size="header" />
+          </Link>
+          {user && (
+            <>
+              <HeaderSearch
+                ref={searchFormRef}
+                value={searchInput}
+                onChange={setSearchInput}
+                busy={searchBusy}
+                className="order-last w-full md:order-none md:ml-auto md:w-auto md:max-w-md md:flex-1"
+              />
+              <nav className="hidden md:flex shrink-0 items-center gap-1" aria-label="Primary">
+                {primaryLinks("desktop")}
+                {utilityLinks("desktop")}
+              </nav>
+              <nav
+                className="md:hidden flex ml-auto shrink-0 items-center gap-1"
+                aria-label="Utility"
+              >
+                {utilityLinks("mobile-header")}
+              </nav>
+            </>
+          )}
+        </div>
+      </header>
+
+      {user && <UnverifiedEmailBanner />}
+
+      {overlayActive ? (
+        <section
+          ref={overlayRef}
+          role="region"
+          aria-label="Search results"
+          aria-busy={searchBusy}
+          className="mx-auto w-full max-w-6xl flex-1 px-4 py-6"
+        >
+          <SearchOverlay search={searchInput} onBusyChange={setSearchBusy} />
+        </section>
+      ) : (
+        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
+          <Outlet />
+        </main>
+      )}
+
+      <footer className="border-t border-border">
+        {/* Two blocks, side by side once there is room for them and stacked
+            when there is not. `lg` rather than `sm` or `md` is where they part:
+            the attribution block's own widest line is the TVmaze sentence, and
+            below ~1024px putting the publisher beside it wraps that sentence
+            into three lines to save one — a worse trade than stacking.
+
+            Stacked, everything centres, which is why the attribution block
+            carries `text-center` and the TMDB row centres its logo over its
+            sentence. Side by side, the attribution goes back to the left edge
+            and the publisher to the right, meeting in the middle. */}
+        <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-4 py-4 text-xs text-muted-foreground lg:flex-row lg:items-center lg:justify-between lg:gap-8">
+          <div className="flex flex-col items-center gap-2 text-center lg:items-start lg:text-left">
+            <div className="flex flex-col items-center gap-2 sm:flex-row sm:items-center sm:gap-3">
+              <a
+                href="https://www.themoviedb.org"
+                target="_blank"
+                rel="noreferrer noopener"
+                className="shrink-0"
+              >
+                {/* Approved TMDB mark, bundled locally and deliberately sized below
+                the header wordmark — TMDB requires it be less prominent than the
+                mark that primarily describes the application, and forbids
+                altering its colour, aspect ratio or orientation. */}
+                <img
+                  src="/tmdb-logo.svg"
+                  alt="The Movie Database (TMDB)"
+                  width={123}
+                  height={16}
+                  className="h-4 w-auto"
+                />
+              </a>
+              <p>
+                {/* TMDB requires this sentence verbatim (NEU-1049). Do not reword.
+                The TVmaze credit that used to trail this sentence is now its own
+                line below, so neither attribution reads as a qualifier on the
+                other. */}
+                This product uses the TMDB API but is not endorsed or certified by TMDB.
+              </p>
+            </div>
+
+            {/* The TVmaze CC BY-SA credit, on its own line rather than trailing the
+            TMDB sentence. It was removed in NEU-1147 once NEU-1146 retired the
+            last TV Maze-derived catalog rows, and returns because NEU-1145
+            re-admitted a TV Maze-derived value: the per-season airdate offset
+            that makes `air_date` mean the date a US Eastern viewer saw.
+
+            The wording is deliberately not the one NEU-1147 removed. That read
+            "Some legacy title data is (c) TVmaze", which is now false — no TV
+            Maze title, date or numbering is stored. What we hold is one integer
+            per (show, season) derived from their airdates, so the credit says
+            *derived*: CC BY-SA asks that a modification be indicated, and
+            claiming their data verbatim would be the inaccurate half of that. */}
+            <p>
+              Airdate corrections are derived from data provided by{" "}
+              <a
+                href="https://www.tvmaze.com"
+                target="_blank"
+                rel="noreferrer noopener"
+                className="underline hover:text-foreground"
+              >
+                TVmaze
+              </a>
+              , licensed under{" "}
+              <a
+                href="https://creativecommons.org/licenses/by-sa/4.0/"
+                target="_blank"
+                rel="noreferrer noopener"
+                className="underline hover:text-foreground"
+              >
+                CC BY-SA 4.0
+              </a>
+              .
+            </p>
+          </div>
+
+          {/* Legal pages: four links, separated by dots. On narrow screens the
+            row wraps and stays center-aligned, matching the stacked layout of
+            the surrounding blocks. */}
+          <nav
+            aria-label="Legal"
+            className="flex flex-wrap justify-center gap-x-1.5 gap-y-1 text-center text-xs lg:justify-start"
+          >
+            <Link to="/terms" className="underline hover:text-foreground">
+              Terms
+            </Link>
+            <span aria-hidden="true">&middot;</span>
+            <Link to="/privacy" className="underline hover:text-foreground">
+              Privacy
+            </Link>
+            <span aria-hidden="true">&middot;</span>
+            <Link to="/about" className="underline hover:text-foreground">
+              About
+            </Link>
+            <span aria-hidden="true">&middot;</span>
+            <Link to="/contact" className="underline hover:text-foreground">
+              Contact
+            </Link>
+          </nav>
+
+          {/* The publisher block: the release line sits under the copyright, and
+            the pair sits under the attribution until `lg`, where it moves to the
+            right edge and the two blocks share a vertical centre. Copyright
+            names the *product*, not the legal entity — the entity belongs in
+            Terms and Privacy, not here — and it keeps the product's own casing
+            rather than backlotter's lowercase house style. */}
+          <div className="flex shrink-0 flex-col items-center gap-1 lg:items-end lg:text-right">
+            <span>&copy; {COPYRIGHT_YEAR} TV BingeFriend.</span>
+            <a
+              href="https://neuroticsasquat.ch"
+              target="_blank"
+              rel="noreferrer noopener"
+              className="inline-flex items-center gap-1.5 hover:text-foreground"
+            >
+              {/* The mark leads the sentence. Deliberately larger than the text it
+                sits beside but still well short of the header wordmark, which is
+                the comparison TMDB's terms actually care about. */}
+              <SasquatchMark className="h-5 w-auto shrink-0" />
+              <span>
+                A <span className="underline">neuroticsasquat.ch</span> release.
+              </span>
+            </a>
+          </div>
+        </div>
+      </footer>
+
+      {user && !inputFocused && (
+        <nav
+          aria-label="Primary"
+          className="md:hidden fixed inset-x-0 bottom-0 z-40 flex border-t border-border bg-background pb-[env(safe-area-inset-bottom)]"
+        >
+          {primaryLinks("mobile-bottom")}
+        </nav>
+      )}
+
+      {user && <PushNudgeCard />}
+
+      <ChangePasswordDialog open={pwOpen} onClose={() => setPwOpen(false)} />
+      <DeleteAccountDialog open={delOpen} onClose={() => setDelOpen(false)} />
+      <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} />
+    </div>
+  );
+}
+
+function HeaderSearch({
+  value,
+  onChange,
+  busy = false,
+  ref,
+  className,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  busy?: boolean;
+  ref?: React.Ref<HTMLFormElement>;
+  className?: string;
+}) {
+  function onSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+  }
+
+  return (
+    <form
+      ref={ref}
+      role="search"
+      onSubmit={onSubmit}
+      className={cn("flex", className)}
+      aria-label="Search shows"
+    >
+      <div className="relative w-full">
+        <SearchIcon
+          className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground"
+          aria-hidden
+        />
+        <input
+          type="search"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Search shows"
+          aria-label="Search shows"
+          spellCheck={false}
+          autoCorrect="off"
+          autoCapitalize="off"
+          autoComplete="off"
+          // text-base (16px) on mobile prevents iOS Safari auto-zoom on focus;
+          // sm:text-sm restores the tighter desktop visual.
+          // `pr-7` whether or not the spinner is up, so the text never shifts
+          // when it appears.
+          className="w-full rounded border border-border bg-background py-1.5 pl-7 pr-7 text-base sm:text-sm focus:outline-none focus:ring-1 focus:ring-foreground"
+        />
+        {/* The app's one spinner (NEU-1502 §3.4): a search in flight has no
+            layout for a skeleton to hold, and the results below it stay on
+            screen while it turns. The search icon stays — it names the field. */}
+        {busy && (
+          <SpinnerIcon
+            className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin motion-reduce:animate-none text-muted-foreground"
+            aria-hidden
+          />
+        )}
+      </div>
+      <span role="status" aria-live="polite" className="sr-only">
+        {busy ? "Searching…" : ""}
+      </span>
+    </form>
+  );
+}

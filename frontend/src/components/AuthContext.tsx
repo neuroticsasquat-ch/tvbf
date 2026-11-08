@@ -1,0 +1,178 @@
+import { createContext, useCallback, useContext, useMemo } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import * as authApi from "@/api/auth";
+import { ApiError, setCsrfToken } from "@/api/client";
+import type { AuthedUser } from "@/api/types";
+
+type AuthContextValue = {
+  user: AuthedUser | null;
+  loading: boolean;
+  login: (email: string, password: string) => Promise<void>;
+  /** One object rather than six positional parameters (NEU-1198). Five of the
+   * six are strings, so a transposed `inviteCode` / `handle` is a defect the
+   * type checker cannot catch — and `handle` is the identifier the account is
+   * then known by, so getting it silently wrong is expensive. */
+  signup: (vars: {
+    email: string;
+    password: string;
+    displayName: string;
+    handle: string;
+    /** Optional since NEU-1165/NEU-1171. Omitted from the body when no code
+     * is used. */
+    inviteCode?: string;
+    turnstileToken?: string;
+  }) => Promise<void>;
+  logout: () => Promise<void>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
+  updateDisplayName: (displayName: string) => Promise<void>;
+  /** Sent as typed — the server owns the normalisation (NEU-1163 §1.1), so the
+   * value that comes back on `AuthedUser` is what was actually stored. */
+  changeHandle: (handle: string) => Promise<void>;
+  deleteAccount: (password: string) => Promise<void>;
+  refresh: () => Promise<void>;
+};
+
+const AuthContext = createContext<AuthContextValue | null>(null);
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const qc = useQueryClient();
+
+  const meQuery = useQuery<AuthedUser | null>({
+    queryKey: ["me"],
+    queryFn: async () => {
+      try {
+        const user = await authApi.me();
+        setCsrfToken(user.csrf_token);
+        return user;
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 401) {
+          setCsrfToken(null);
+          return null;
+        }
+        throw e;
+      }
+    },
+    staleTime: 60_000,
+  });
+
+  const refresh = useCallback(async () => {
+    await qc.invalidateQueries({ queryKey: ["me"] });
+  }, [qc]);
+
+  const loginMut = useMutation({
+    mutationFn: (vars: { email: string; password: string }) => authApi.login(vars),
+    onSuccess: (user) => {
+      setCsrfToken(user.csrf_token);
+      qc.setQueryData(["me"], user);
+    },
+  });
+  const signupMut = useMutation({
+    mutationFn: (vars: {
+      email: string;
+      password: string;
+      display_name: string;
+      handle: string;
+      invite_code?: string;
+      turnstile_token?: string;
+    }) => authApi.signup(vars),
+    onSuccess: (user) => {
+      setCsrfToken(user.csrf_token);
+      qc.setQueryData(["me"], user);
+    },
+  });
+  const logoutMut = useMutation({
+    mutationFn: () => authApi.logout(),
+    onSuccess: () => {
+      setCsrfToken(null);
+      qc.setQueryData(["me"], null);
+      qc.removeQueries({ queryKey: ["my-shows"] });
+    },
+  });
+  const changePwMut = useMutation({
+    mutationFn: (vars: { current_password: string; new_password: string }) =>
+      authApi.changePassword(vars),
+    onSuccess: (user) => {
+      setCsrfToken(user.csrf_token);
+      qc.setQueryData(["me"], user);
+    },
+  });
+  const updateMeMut = useMutation({
+    mutationFn: (vars: { display_name: string }) => authApi.updateMe(vars),
+    onSuccess: (user) => {
+      setCsrfToken(user.csrf_token);
+      qc.setQueryData(["me"], user);
+    },
+  });
+  const updateHandleMut = useMutation({
+    mutationFn: (vars: { handle: string }) => authApi.updateHandle(vars),
+    onSuccess: (user) => {
+      setCsrfToken(user.csrf_token);
+      qc.setQueryData(["me"], user);
+    },
+  });
+  const deleteMut = useMutation({
+    mutationFn: (vars: { password: string }) => authApi.deleteAccount(vars),
+    onSuccess: () => {
+      setCsrfToken(null);
+      qc.setQueryData(["me"], null);
+      qc.clear();
+    },
+  });
+
+  const value = useMemo<AuthContextValue>(
+    () => ({
+      user: meQuery.data ?? null,
+      loading: meQuery.isLoading,
+      login: async (email, password) => {
+        await loginMut.mutateAsync({ email, password });
+      },
+      signup: async ({ email, password, displayName, handle, inviteCode, turnstileToken }) => {
+        await signupMut.mutateAsync({
+          email,
+          password,
+          display_name: displayName,
+          handle,
+          invite_code: inviteCode,
+          turnstile_token: turnstileToken,
+        });
+      },
+      logout: async () => {
+        await logoutMut.mutateAsync();
+      },
+      changePassword: async (cur, next) => {
+        await changePwMut.mutateAsync({ current_password: cur, new_password: next });
+      },
+      updateDisplayName: async (displayName) => {
+        await updateMeMut.mutateAsync({ display_name: displayName });
+      },
+      changeHandle: async (handle) => {
+        await updateHandleMut.mutateAsync({ handle });
+      },
+      deleteAccount: async (password) => {
+        await deleteMut.mutateAsync({ password });
+      },
+      refresh,
+    }),
+    [
+      meQuery.data,
+      meQuery.isLoading,
+      loginMut,
+      signupMut,
+      logoutMut,
+      changePwMut,
+      updateMeMut,
+      updateHandleMut,
+      deleteMut,
+      refresh,
+    ],
+  );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function useAuth() {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
+  return ctx;
+}
