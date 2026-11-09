@@ -1,14 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "./client";
+import type { SessionSummary } from "./types";
 
-export interface SessionSummary {
-  id: string;
-  device_label: string;
-  ip: string | null;
-  last_seen_at: string;
-  created_at: string;
-  is_current: boolean;
-}
+export type { SessionSummary };
 
 export const fetchMySessions = () => apiFetch<SessionSummary[]>("/me/sessions");
 

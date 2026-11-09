@@ -10,9 +10,10 @@ import logging
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, EmailStr
+from pydantic import EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tvbf.api_schema import ApiSchema
 from tvbf.app.models import User
 from tvbf.app.schemas import InviteOut
 from tvbf.app.services import invite_service
@@ -27,7 +28,7 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin/invites", tags=["admin"])
 
 
-class AdminInviteEmailRequest(BaseModel):
+class AdminInviteEmailRequest(ApiSchema):
     email: EmailStr
 
 

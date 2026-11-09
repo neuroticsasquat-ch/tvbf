@@ -148,6 +148,13 @@ tasks:
     cmds:
       - "{{.EXEC}} pyright {{.CLI_ARGS}}"
 
+  # Through a temporary file, so a failed export leaves the committed one as it
+  # was. The module writes the document alone to stdout; logs go to stderr.
+  api:openapi:
+    desc: Write openapi.json, the API's contract, from the app (task fe:generate also regenerates the SPA's types)
+    cmds:
+      - "{{.EXEC}} python -m tvbf.openapi > openapi.json.tmp && mv openapi.json.tmp openapi.json || { rm -f openapi.json.tmp; exit 1; }"
+
   coverage:
     desc: 'Run pytest with coverage (HTML report lands in ./htmlcov)'
     cmds:
@@ -490,6 +497,15 @@ tasks:
     desc: Run the frontend tests in watch mode
     cmds:
       - "{{.FE_EXEC}} pnpm run test:watch {{.CLI_ARGS}}"
+
+  # The document goes in on stdin: the frontend container mounts frontend/, not
+  # the repo root, so it cannot read openapi.json itself. CI's api-types job runs
+  # the same two steps outside the containers and fails if either file changed.
+  fe:generate:
+    desc: Regenerate openapi.json and, from it, frontend/src/api/schema.d.ts (commit both; CI fails on drift)
+    cmds:
+      - task: api:openapi
+      - "{{.FE_EXEC}} sh scripts/generate-api.sh < openapi.json"
 
   # Exception (CONVENTIONS.md names this `build:app`): `fe:build` is the name the
   # monorepo spec (ops, Decision 8) gives it. The rule exists so the bundle can't be

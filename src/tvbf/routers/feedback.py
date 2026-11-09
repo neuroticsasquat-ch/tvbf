@@ -7,8 +7,9 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from tvbf.api_schema import ApiSchema
 from tvbf.app.models import User
 from tvbf.app.services import feedback_service
 from tvbf.config import Settings, get_settings
@@ -21,7 +22,7 @@ log = logging.getLogger(__name__)
 router = APIRouter(tags=["feedback"])
 
 
-class FeedbackIn(BaseModel):
+class FeedbackIn(ApiSchema):
     subject: str = Field(min_length=1, max_length=120)
     body: str = Field(min_length=1, max_length=5000)
 
