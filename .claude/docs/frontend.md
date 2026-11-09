@@ -1,112 +1,65 @@
-# CLAUDE.md
+# Frontend guide
 
-> **Monorepo note (NEU-2235).** This frontend now lives under `frontend/` in the `tvbf` monorepo,
-> with the backend at the repo root. Its own compose file, Taskfile, pre-commit config and CI are
-> gone: run everything from the root, where each `task <x>` below is `task fe:<x>` (`task up` starts
-> both containers), and CI is the root's `.github/workflows/ci.yml` (`js` job). References to a
-> sibling `tvbf-backend` repo mean the repo root. The docs PR (NEU-2259) rewrites this file.
+> The SPA's guide. It was `.claude/CLAUDE.md` in the `tvbf-frontend` repo and moved here with the
+> docs merge (NEU-2259). The root `.claude/CLAUDE.md` covers the repo as a whole (layout, git, the
+> Taskfile, specs and Linear); this file is what is specific to `frontend/`.
+> Read it in full before the first edit under `frontend/`.
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## Layout
 
-## Repo layout
+The SPA lives under `frontend/` in the `tvbf` monorepo. It is a React 19 + Vite 6 + TypeScript +
+Tailwind v4 + shadcn/ui SPA: a read+write app covering signup/login, browse/search,
+show/season/episode pages, My Shows, Watch Next, Upcoming, watch tracking, ratings, friends and
+recommendations. The backend at the repo root holds the TMDB catalog mirror and every API this SPA
+calls. **Paths in this file are relative to `frontend/`** unless they start with `docs/` or
+`.claude/`.
 
-This is the **frontend** repo for **TV Binge Friend**, a web app for tracking TV watching with a
-social layer (accepted/pending/blocked connections + friend-scoped show/episode activity). It is a
-React 19 + Vite 6 + TypeScript + Tailwind v4 + shadcn/ui SPA: a read+write app covering
-signup/login, browse/search, show/season/episode pages, My Shows, Watch Next, Upcoming, watch
-tracking, ratings, friends and recommendations.
-
-Its sibling is **[`tvbf-backend`](https://github.com/neuroticsasquat-ch/tvbf-backend)** — a FastAPI
-service holding the TMDB catalog mirror and every API this SPA calls. It carries its own
-`.claude/CLAUDE.md`, and that file is the reference for anything server-side. Both repos are cloned
-side by side under one parent directory, which sits beside `tbc-localdev-infra` (the path
-both Taskfiles include it from):
-
-```
-<projects>/
-  tbc-localdev-infra/
-  <parent>/
-    tvbf-frontend/    <- you are here
-    tvbf-backend/
-```
-
-Nothing outside this repo is required to work in it. There is no umbrella-level `CLAUDE.md` or
-`docs/` any more — everything relocated into the two repos on 2026-08-20 so a `git clone` is
-sufficient on a new machine.
-
-- `docs/specs/` — approved design specs. **`specs_dir: docs`** (repo-relative). **Frontend-only**
-  specs live here — the ones whose `**Repo:**` header says `tvbf-frontend`, which is what the
-  split was made on.
-  **A spec that is a cross-repo contract belongs in `tvbf-backend/docs/specs/` instead**, even
-  when the work is shared: that is where the frontend half cites the request/response shape by
-  URL. NEU-1031 drew that rule and the relocation kept it. Every project spec
-  (`tvbf-*-project-spec.md`, four as of 2026-09-26) is in the backend repo for the same reason — both repos cite them.
-- `docs/plans/` — implementation plans, when a spec needs a separate one.
-- `docs/superpowers/{specs,plans}/` — the retired layout, kept as an archive. It holds only the
-  two frontend-only pairs (`2026-04-19-frontend-mvp`, `2026-05-02-home-tabs-redesign`); the
-  cross-stack pairs from that era are in `tvbf-backend/docs/superpowers/`. New docs go to the flat
-  paths above.
-
-**Specs written before 2026-08-20 say they "live in the umbrella `docs/`".** That directory is
-gone; read those sentences as "this repo's `docs/specs/`". The rationale each one gives — that
-nothing in another repo cites it — is still the rule; only the two homes it chose between were
-renamed.
-
-**Linear home** (for `/personal:projectit`, per `spec-and-plan-convention.md`):
-
-- `linear_initiative: TV BingeFriend`
-- `linear_team: Neuroticsasquatch`
-- `linear_repos: tvbf-backend, tvbf-frontend`
-
-The `repo:<name>` label `loop.py` filters on is derived per repo from its own git remote basename,
-so it is `repo:tvbf-frontend` here — the name above must match.
+Its specs are in the root `docs/specs/`, next to the backend's; the ones whose `**Repo:**` header
+says `tvbf-frontend` were written for this half. Its two retired-layout pairs
+(`2026-04-19-frontend-mvp`, `2026-05-02-home-tabs-redesign`) are in `docs/superpowers/`. Its
+glossary is the *Brand* section of the root `CONTEXT.md`.
 
 ## Hard constraints
 
-- **Git is allowed here, within limits.** Branching, staging, committing and pushing are fine to do without asking, including from subagents. Never commit directly to `main`, cut a branch first. Destructive operations — `reset --hard`, `push --force`, branch deletion, history rewriting — still need explicit confirmation every time.
-- **Containerization is non-negotiable. There is no local Node toolchain.** Every `pnpm`/`vite`/`tsc`/`eslint`/`vitest` invocation runs inside the `tvbf-frontend` service's container, which uses pnpm 9. `task` targets wrap `docker compose exec` — use them.
-- **The shared localdev infra at `~/projects/tbc-localdev-infra/` must be running first.** That compose project owns `tbc_postgresql_db`, Traefik (TLS termination for `*.localhost`), Mailpit, and the external `proxy` Docker network this SPA joins. If Traefik isn't up, nothing here works. `task up` starts it first (via `task infra:up`, whose namespace comes from an include in `Taskfile.yml`).
-- **The dev setup follows `~/projects/tbc-localdev-infra/CONVENTIONS.md`** — the shared contract for task names, the compose service and the pre-commit hooks across every app repo on that stack. Change it there before diverging here.
-- **The backend must be running for anything past the login screen.** `cd ../tvbf-backend && task up`. Its `task` commands run from that repo, not this one.
+- **Containerization is non-negotiable. There is no local Node toolchain.** Every `pnpm`/`vite`/`tsc`/`eslint`/`vitest` invocation runs inside the `tvbf-frontend` service's container, which uses pnpm 9. `task fe:*` targets wrap `docker compose exec` — use them.
+- **The backend must be running for anything past the login screen.** `task up` starts both containers.
 
 ## Commands
 
-All `task` commands run from this repo's root.
+All `task` commands run from the repo root. `task up` / `down` / `build` and `task infra:*` cover
+both containers; see the root guide.
 
-- `task up` — start the shared infra, then the container
-- `task down` / `task restart` — stop / restart the container (the shared infra keeps running)
-- `task build` — rebuild the image, sync deps into the `node_modules` volume, recreate the container
-- `task logs` — follow (Ctrl+C to stop, container keeps running)
-- `task shell` — shell inside the container
-- `task install` — install dependencies via pnpm inside the container
-- `task infra:up` / `task infra:down` — wraps the shared localdev infra Taskfile
+- `task fe:logs` — follow the frontend container (Ctrl+C to stop, container keeps running)
+- `task fe:shell` — shell inside the container
+- `task fe:install` — reinstall dependencies from `pnpm-lock.yaml` inside the container
+- `task fe:deps:add -- <pkg>` / `task fe:deps:add-dev -- <pkg>` / `task fe:deps:remove -- <pkg>` — edit dependencies via pnpm
 
 Quality gates:
 
-- `task test` — `vitest run`
-- `task test:watch` — vitest in watch mode
-- `task lint` — oxlint
-- `task format` / `task format:check` — prettier write / check (`task format:check -- <files>` checks only those)
-- `task typecheck` — `tsc --noEmit`
+- `task fe:test` — `vitest run` (`task fe:test -- src/path/to/file.test.tsx` for one file)
+- `task fe:test:watch` — vitest in watch mode
+- `task fe:lint` — oxlint
+- `task fe:format` / `task fe:format:check` — prettier write / check (`task fe:format:check -- <files>` checks only those)
+- `task fe:typecheck` — `tsc --noEmit`
+- `task fe:build` / `task fe:worker-check` — the production build, and a dry-run of the Worker deploy
 
 ## The backend contract
 
 Every endpoint this SPA calls, its cache headers, its per-user fields and its status codes are
-documented in the backend repo — read those before changing an API call or adding one:
+documented beside this file — read those before changing an API call or adding one:
 
-- `tvbf-backend/.claude/docs/architecture-endpoints.md` — the annotated endpoint surface.
-- `tvbf-backend/.claude/docs/patterns-auth-and-abuse.md` — sessions, CSRF, the signup/login gates,
+- `.claude/docs/architecture-endpoints.md` — the annotated endpoint surface.
+- `.claude/docs/patterns-auth-and-abuse.md` — sessions, CSRF, the signup/login gates,
   Turnstile, and the moderation surface (`disabled_at`, reports).
-- `tvbf-backend/.claude/docs/patterns-recommendations.md` — the never-recommend rule and
+- `.claude/docs/patterns-recommendations.md` — the never-recommend rule and
   `GET /me/recommendations`, which the *"mutation that creates or removes a never-recommend
   record"* convention below is the client half of.
-- `tvbf-backend/docs/specs/` — the cross-repo contract specs, cited by ticket id from this repo's
-  own specs.
+- `docs/specs/` — the cross-repo contract specs, cited by ticket id from the frontend's own specs.
 
 ## Module map
 
 ```
-tvbf-frontend/src/
+frontend/src/
   main.tsx, router.tsx, env.ts
   api/
     client.ts          # fetch wrapper: credentials: include, CSRF header, JSON handling
@@ -168,20 +121,14 @@ tvbf-frontend/src/
 
 ## Planning workflow
 
-Multi-step features follow the spec-then-plan flow already used in these repos:
-
-1. Design spec lives at `docs/specs/<TICKET-ID>-<slug>.md`.
-2. Implementation plan lives at `docs/plans/<TICKET-ID>-<slug>.md` and references its spec. Plans use TDD-style step-by-step tasks with full code in each step. Plans in this repo explicitly do NOT include `git commit` steps — the user commits on their own cadence.
-
-Read a recent spec (e.g. `docs/specs/NEU-1187-one-add-remove-control.md` or
-`docs/specs/NEU-1182-the-card-badge-system.md`) to see the expected structure before starting a new
-feature. `docs/superpowers/{specs,plans}/` holds the retired layout — an archive, not where new
-docs go.
+The root guide's spec-then-plan flow applies unchanged. Read a recent frontend spec (e.g.
+`docs/specs/NEU-1187-one-add-remove-control.md` or `docs/specs/NEU-1182-the-card-badge-system.md`)
+to see the expected structure before starting a new feature.
 
 ## Quality gates
 
-`.pre-commit-config.yaml` runs `task lint`, `task format:check`, `task typecheck` and `task test`
-on any commit touching a `ts`/`tsx`/`js`/`mjs`/`json`/`css` file — inside the container, so it
-must be up. Run `pre-commit install` once per clone. The format hook checks **only the staged
-files**, because `main` has known prettier drift (CONVENTIONS.md's documented exception); format
-what you touch with `task format`. CI runs the same gates.
+The root `.pre-commit-config.yaml` runs the `fe-*` hooks (`task fe:lint`, `task fe:format:check`,
+`task fe:typecheck`, `task fe:test`) on any commit touching a `ts`/`tsx`/`js`/`mjs`/`json`/`css`
+file under `frontend/` — inside the container, so it must be up. The format hook checks **only the
+staged files**, because the frontend has known prettier drift (CONVENTIONS.md's documented
+exception); format what you touch with `task fe:format`. CI's `js` job runs the same gates.

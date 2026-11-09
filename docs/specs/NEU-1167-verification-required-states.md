@@ -2,7 +2,7 @@
 
 **Ticket:** [NEU-1167](https://linear.app/neuroticsasquatch/issue/NEU-1167/frontend-verification-required-states-on-connect-and-people-search)
 **Parent:** [NEU-1152](https://linear.app/neuroticsasquatch/issue/NEU-1152/gate-social-actions-on-a-verified-email) · **Milestone:** 1. Trust boundary · **Project:** TVBF: Open Registration
-**Backend half:** [NEU-1161](https://linear.app/neuroticsasquatch/issue/NEU-1161/backend-require-a-verified-email-for-connection-requests-and-search) — **merged 2026-08-19**. Its contract is `tvbf-backend/docs/specs/NEU-1161-a-verified-email-as-the-price-of-social-access.md` §4, cited throughout below.
+**Backend half:** [NEU-1161](https://linear.app/neuroticsasquatch/issue/NEU-1161/backend-require-a-verified-email-for-connection-requests-and-search) — **merged 2026-08-19**. Its contract is `docs/specs/NEU-1161-a-verified-email-as-the-price-of-social-access.md` §4, cited throughout below.
 
 ## 1. Problem
 

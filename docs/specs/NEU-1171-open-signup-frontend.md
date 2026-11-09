@@ -2,7 +2,7 @@
 
 **Ticket:** [NEU-1171](https://linear.app/neuroticsasquatch/issue/NEU-1171/frontend-signup-without-a-required-invite-code)
 **Parent:** [NEU-1156](https://linear.app/neuroticsasquatch/issue/NEU-1156/make-the-invite-code-optional-at-signup) · **Milestone:** 3. Launch switch · **Project:** TVBF: Open Registration
-**Backend half:** [NEU-1165](https://linear.app/neuroticsasquatch/issue/NEU-1165/backend-make-invite-code-optional-in-signuprequest) — Done, merged. Spec: [`tvbf-backend/docs/specs/NEU-1165-open-registration.md`](https://github.com/neuroticsasquat-ch/tvbf-backend/blob/main/docs/specs/NEU-1165-open-registration.md)
+**Backend half:** [NEU-1165](https://linear.app/neuroticsasquatch/issue/NEU-1165/backend-make-invite-code-optional-in-signuprequest) — Done, merged. Spec: [`docs/specs/NEU-1165-open-registration.md`](https://github.com/neuroticsasquat-ch/tvbf-backend/blob/main/docs/specs/NEU-1165-open-registration.md)
 **Repo:** tvbf-frontend
 
 ## 1. Problem

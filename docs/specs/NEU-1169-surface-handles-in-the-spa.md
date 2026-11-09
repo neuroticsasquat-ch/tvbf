@@ -6,7 +6,7 @@
 **Project:** TVBF: Open Registration — milestone *2. Identity*
 **Blocked by:** [NEU-1163](https://linear.app/neuroticsasquatch/issue/NEU-1163) — shipped 2026-08-21
 **Related:** [NEU-1198](https://linear.app/neuroticsasquatch/issue/NEU-1198) (shipped — the signup hotfix this spec inherits), [NEU-1196](https://linear.app/neuroticsasquatch/issue/NEU-1196) (shipped — the 422 field-error client)
-**The contract:** [`tvbf-backend/docs/specs/NEU-1163-unique-user-handles.md`](https://github.com/neuroticsasquat-ch/tvbf-backend/blob/main/docs/specs/NEU-1163-unique-user-handles.md) — cited by section throughout
+**The contract:** [`docs/specs/NEU-1163-unique-user-handles.md`](https://github.com/neuroticsasquat-ch/tvbf-backend/blob/main/docs/specs/NEU-1163-unique-user-handles.md) — cited by section throughout
 **Written:** 2026-08-21
 **Status:** approved for implementation
 

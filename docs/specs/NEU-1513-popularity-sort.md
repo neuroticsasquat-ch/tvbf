@@ -3,7 +3,7 @@
 **Ticket:** [NEU-1513](https://linear.app/neuroticsasquatch/issue/NEU-1513/add-popularity-if-available-as-default-show-search-sort-option)
 **Repo:** `tvbf-backend` — branch `tom/neu-1513-add-popularity-if-available-as-default-show-search-sort` from `main`
 **Project:** tvbf: Maintenance
-**Other half:** `tvbf-frontend/docs/specs/NEU-1513-popularity-default-search-sort.md` (the overlay option and the default). The frontend half **depends on this one**: it sends `sort=-popularity`, which this half teaches the API. Ship this first.
+**Other half:** `docs/specs/NEU-1513-popularity-default-search-sort.md` (the overlay option and the default). The frontend half **depends on this one**: it sends `sort=-popularity`, which this half teaches the API. Ship this first.
 **Precedents this consumes:** `docs/specs/NEU-1502-speed-up-show-search.md` §2.4 (the stored `last_aired` column and its partial index — the shape every decision here copies), `src/tvbf/tmdb/popularity.py` and `.claude/docs/patterns-tmdb-ingest.md` §popularity (NEU-1172: how `catalog.show.popularity` is kept fresh), `tmdb/recommendations_backfill.py` (the one existing `popularity DESC` ordering, and why it coalesces nulls), ADR-0013 §"Ambiguity resolves by popularity"
 **Glossary:** `CONTEXT.md` — **Popularity** (added by this ticket's design session; note what the entry says to *avoid*)
 **Status:** approved for implementation
