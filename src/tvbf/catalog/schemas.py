@@ -48,8 +48,9 @@ character as free text, so `catalog.character` has no image column at all.
 from dataclasses import dataclass, field
 from datetime import date, datetime, time
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 
+from tvbf.api_schema import ApiSchema
 from tvbf.catalog import models as m
 from tvbf.catalog.episodes import public_number
 from tvbf.catalog.images import PROFILE, medium_url, poster_urls, profile_urls, still_urls
@@ -83,7 +84,7 @@ class ShowFilters:
     type: str | None = None
 
 
-class NetworkRef(BaseModel):
+class NetworkRef(ApiSchema):
     """Compact network reference. Also the type of the retired `web_channel`
     key, which every payload now leaves null — see the module docstring."""
 
@@ -93,7 +94,7 @@ class NetworkRef(BaseModel):
     name: str
 
 
-class NetworkOut(BaseModel):
+class NetworkOut(ApiSchema):
     """Full network representation for GET /networks."""
 
     model_config = ConfigDict(from_attributes=True)
@@ -105,20 +106,20 @@ class NetworkOut(BaseModel):
     timezone: str | None = None
 
 
-class GenreOut(BaseModel):
+class GenreOut(ApiSchema):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     name: str
 
 
-class ExternalsOut(BaseModel):
+class ExternalsOut(ApiSchema):
     imdb: str | None = None
     tvdb: int | None = None
     tvrage: int | None = None
 
 
-class SeasonOut(BaseModel):
+class SeasonOut(ApiSchema):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -134,7 +135,7 @@ class SeasonOut(BaseModel):
     summary: str | None = None
 
 
-class EpisodeOut(BaseModel):
+class EpisodeOut(ApiSchema):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -157,7 +158,7 @@ class EpisodeOut(BaseModel):
     watched: bool | None = None
 
 
-class ShowSummary(BaseModel):
+class ShowSummary(ApiSchema):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -229,7 +230,7 @@ class BrowseShowOut(MarkedShowOut):
     """
 
 
-class ShowListPage(BaseModel):
+class ShowListPage(ApiSchema):
     items: list[BrowseShowOut]
     page: int
     per_page: int
@@ -269,7 +270,7 @@ class TrendingShowOut(MarkedShowOut):
     """
 
 
-class TrendingOut(BaseModel):
+class TrendingOut(ApiSchema):
     """The `GET /trending` body.
 
     An object rather than a bare array, because the list is only half of what
@@ -304,7 +305,7 @@ class PopularShowOut(MarkedShowOut):
     friend_count: int
 
 
-class PopularWithFriendsOut(BaseModel):
+class PopularWithFriendsOut(ApiSchema):
     """The `GET /me/friends/popular` body.
 
     `connection_count` is the size of the viewer's accepted, enabled
@@ -352,7 +353,7 @@ class AnticipatedShowOut(MarkedShowOut):
     """
 
 
-class PersonRef(BaseModel):
+class PersonRef(ApiSchema):
     """Compact person reference used inside credit payloads."""
 
     model_config = ConfigDict(from_attributes=True)
@@ -362,7 +363,7 @@ class PersonRef(BaseModel):
     image_medium: str | None = None
 
 
-class CharacterRef(BaseModel):
+class CharacterRef(ApiSchema):
     """Compact character reference used inside cast payloads."""
 
     model_config = ConfigDict(from_attributes=True)
@@ -372,7 +373,7 @@ class CharacterRef(BaseModel):
     image_medium: str | None = None
 
 
-class CastMemberOut(BaseModel):
+class CastMemberOut(ApiSchema):
     """One cast credit, at whichever grain the route serves (NEU-1512 §4.1).
 
     `episode_count` is the aggregate count on the show routes, the in-season
@@ -390,7 +391,7 @@ class CastMemberOut(BaseModel):
     episode_count: int | None = None
 
 
-class CrewMemberOut(BaseModel):
+class CrewMemberOut(ApiSchema):
     """One crew credit. `episode_count` is the aggregate on the show routes, the
     in-season count on the season route, and null on the episode route."""
 
@@ -399,7 +400,7 @@ class CrewMemberOut(BaseModel):
     episode_count: int | None = None
 
 
-class SeasonCastOut(BaseModel):
+class SeasonCastOut(ApiSchema):
     """A season's cast as the season page renders it: the regulars upstream lists
     for the season, then everyone else who guested in its episodes (NEU-1512)."""
 
@@ -407,7 +408,7 @@ class SeasonCastOut(BaseModel):
     guests: list[CastMemberOut]
 
 
-class PersonOut(BaseModel):
+class PersonOut(ApiSchema):
     """A person, as returned by GET /people/{id} and as each item of a
     GET /people search page."""
 
@@ -424,7 +425,7 @@ class PersonOut(BaseModel):
     image_original: str | None = None
 
 
-class PersonListPage(BaseModel):
+class PersonListPage(ApiSchema):
     """Paginated person search results. Items are the same shape as person
     detail — a person row is small, and one person shape keeps the frontend from
     needing a second fetch to render anything beyond a name."""
@@ -436,7 +437,7 @@ class PersonListPage(BaseModel):
     total_pages: int
 
 
-class ShowRef(BaseModel):
+class ShowRef(ApiSchema):
     """Compact show reference used inside a person's filmography."""
 
     model_config = ConfigDict(from_attributes=True)
@@ -447,7 +448,7 @@ class ShowRef(BaseModel):
     premiered: date | None = None
 
 
-class EpisodeRef(BaseModel):
+class EpisodeRef(ApiSchema):
     """Compact episode reference used inside episode-level credits. Carries
     season and number so the frontend can render "Show — S2E11" without a round
     trip."""
@@ -461,7 +462,7 @@ class EpisodeRef(BaseModel):
     airdate: date | None = None
 
 
-class PersonCastCreditOut(BaseModel):
+class PersonCastCreditOut(ApiSchema):
     """A regular credit: one (show, character) the person is a season regular as
     (NEU-1512). `episode_count` is the aggregate, null when upstream's aggregate
     lists no such role; `seasons` are the season numbers, ascending;
@@ -476,7 +477,7 @@ class PersonCastCreditOut(BaseModel):
     last_credited: date | None = None
 
 
-class PersonCrewCreditOut(BaseModel):
+class PersonCrewCreditOut(ApiSchema):
     """A series crew credit (NEU-1512 §2.2), with its aggregate episode count."""
 
     show: ShowRef
@@ -484,7 +485,7 @@ class PersonCrewCreditOut(BaseModel):
     episode_count: int | None = None
 
 
-class PersonGuestCreditOut(BaseModel):
+class PersonGuestCreditOut(ApiSchema):
     show: ShowRef
     episode: EpisodeRef
     character: CharacterRef
@@ -492,13 +493,13 @@ class PersonGuestCreditOut(BaseModel):
     voice: bool = False
 
 
-class PersonEpisodeCrewCreditOut(BaseModel):
+class PersonEpisodeCrewCreditOut(ApiSchema):
     show: ShowRef
     episode: EpisodeRef
     role: str
 
 
-class PersonCreditsOut(BaseModel):
+class PersonCreditsOut(ApiSchema):
     """Grouped filmography. The four kinds are genuinely different shapes
     (person-as-character, person-in-function, person-as-character-in-one-episode,
     person-in-function-on-one-episode) and the page renders them as separate

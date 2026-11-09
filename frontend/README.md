@@ -1,12 +1,8 @@
-# tvbf-frontend
+# TV Binge Friend — frontend
 
-> **Monorepo note (NEU-2235).** This frontend now lives under `frontend/` in the `tvbf` monorepo,
-> with the backend at the repo root. Its own compose file, Taskfile, pre-commit config and CI are
-> gone: run everything from the root, where each `task <x>` below is `task fe:<x>` (`task up` starts
-> both containers), and CI is the root's `.github/workflows/ci.yml` (`js` job). References to a
-> sibling `tvbf-backend` repo mean the repo root. The docs PR (NEU-2259) rewrites this file.
+React SPA for TV Binge Friend. Auth, catalog browse, search, watchlist, and per-episode watch tracking against the backend API at the [repo root](..).
 
-React SPA for TV Binge Friend. Auth, catalog browse, search, watchlist, and per-episode watch tracking against the [tvbf-backend](../tvbf-backend) API.
+It lives under `frontend/` in the `tvbf` monorepo (NEU-2235). Everything runs from the repo root: one compose file, one Taskfile (this half's targets are `fe:*`), one pre-commit config, and CI's `js` job in `.github/workflows/ci.yml`. The guide for working in it is [`.claude/docs/frontend.md`](../.claude/docs/frontend.md); its specs are in [`docs/specs/`](../docs/specs/).
 
 ## Stack
 
@@ -18,7 +14,6 @@ React 19 · Vite 6 · TypeScript · React Router 7 · TanStack Query · Tailwind
 - [`go-task`](https://taskfile.dev) (`brew install go-task`).
 - [`tbc-localdev-infra`](../../tbc-localdev-infra) cloned at `~/projects/tbc-localdev-infra` (Traefik + shared Postgres). The dev setup here follows its `CONVENTIONS.md` (`~/projects/tbc-localdev-infra/CONVENTIONS.md`).
 - [`pre-commit`](https://pre-commit.com) (`brew install pre-commit`).
-- [`tvbf-backend`](../tvbf-backend) running (this SPA needs the API).
 
 No local Node/pnpm needed — everything runs in the `tvbf-frontend` service's container.
 
@@ -26,11 +21,11 @@ No local Node/pnpm needed — everything runs in the `tvbf-frontend` service's c
 
 ```sh
 task infra:up       # first run: shared Traefik + Postgres and the `proxy` network `build` needs
-task build          # build image, sync deps, start the container (also after dep changes)
+task build          # build both images, sync deps, start the containers (also after dep changes)
 pre-commit install  # once per clone: lint/format/typecheck/test on commit (container must be up)
 ```
 
-After that, `task up` starts the shared infra and then the dev container.
+Run these from the repo root. After that, `task up` starts the shared infra and then both containers (this SPA needs the backend's API).
 
 Open **https://app.tvbf.localhost/**. Accept the self-signed cert; do the same once for **https://api.tvbf.localhost/** so the browser trusts the API origin and accepts cross-subdomain session cookies.
 
@@ -38,17 +33,18 @@ A user account is required — sign up with an invite code issued by the backend
 
 ## Commands
 
-All `task` targets run inside the container.
+All `task` targets run from the repo root, inside the container.
 
 | Target | Purpose |
 |---|---|
-| `task up` / `down` / `restart` / `build` / `logs` / `shell` | container lifecycle (`up` starts the shared infra too) |
-| `task test` | run Vitest once (`task test -- <path>` for a single file) |
-| `task test:watch` | Vitest watch mode |
-| `task lint` / `format` / `format:check` / `typecheck` | quality gates |
-| `task build:app` | production Vite build |
-| `task worker:check` | build, then dry-run the Worker deploy |
-| `task deps:add -- <pkg>` / `deps:add-dev -- <pkg>` / `deps:remove -- <pkg>` | add / remove deps via pnpm |
+| `task up` / `down` / `build` | lifecycle for both containers (`up` starts the shared infra too) |
+| `task fe:logs` / `fe:shell` | follow the frontend container / open a shell in it |
+| `task fe:test` | run Vitest once (`task fe:test -- <path>` for a single file) |
+| `task fe:test:watch` | Vitest watch mode |
+| `task fe:lint` / `fe:format` / `fe:format:check` / `fe:typecheck` | quality gates |
+| `task fe:build` | production Vite build |
+| `task fe:worker-check` | build, then dry-run the Worker deploy |
+| `task fe:deps:add -- <pkg>` / `fe:deps:add-dev -- <pkg>` / `fe:deps:remove -- <pkg>` | add / remove deps via pnpm |
 
 ## Architecture
 
@@ -141,7 +137,7 @@ Workers Builds settings:
 - **Deploy command:** `npx wrangler deploy`, Workers Builds' default — it resolves the
   `wrangler` dev dependency. The `deploy` script is the same command; run it as
   `pnpm run deploy`, never `pnpm deploy`, which is a pnpm built-in that ignores the script.
-- **Root directory:** the repo root.
+- **Root directory:** `frontend/`, with build watch paths `frontend/**`.
 
 Build variables the app reads (set them as **build** variables, not Worker runtime variables
 — the bundle is static, so every value is fixed at build time):
@@ -156,8 +152,8 @@ Build variables the app reads (set them as **build** variables, not Worker runti
 
 The release SHA needs no variable: Workers Builds sets `WORKERS_CI_COMMIT_SHA` itself.
 
-To check the Worker locally, `task worker:check` builds and dry-runs the deploy, listing the
-assets it would upload. `pnpm exec wrangler dev` (from `task shell`) serves `dist/` the way
+To check the Worker locally, `task fe:worker-check` builds and dry-runs the deploy, listing the
+assets it would upload. `pnpm exec wrangler dev` (from `task fe:shell`) serves `dist/` the way
 production does.
 
 ## Testing

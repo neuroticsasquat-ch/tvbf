@@ -1,0 +1,7 @@
+# `tools/openapi-types` holds openapi-typescript, which `scripts/generate-api.sh` runs to write
+# `src/api/schema.d.ts` (NEU-2261). The generator drives TypeScript's JS compiler API, which the
+# app's TypeScript 7 no longer ships, and pnpm satisfies a peer from the dependencies of the
+# package that installs it, so the generator gets a package of its own with TypeScript 5 beside it. A pnpm
+# override of the peer does not help: it rewrites the range, and the app's TypeScript 7 still wins.
+packages:
+  - tools/*

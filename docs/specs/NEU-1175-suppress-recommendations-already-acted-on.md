@@ -5,7 +5,7 @@
 **Repo:** `tvbf-backend`
 **Project:** TVBF: Maintenance
 **Project spec:** `docs/specs/tvbf-personalized-recommendations-project-spec.md` (umbrella) §8, §9, §11
-**Contract doc:** `tvbf-backend/docs/specs/NEU-1112-recommendations-page-contract.md` (cited by `tvbf-frontend`)
+**Contract doc:** `docs/specs/NEU-1112-recommendations-page-contract.md` (cited by `tvbf-frontend`)
 **Blocks:** NEU-1176 (frontend refresh after an add), NEU-1178 (dismissal, which adds a fifth source to this definition)
 **Status:** approved for implementation
 
@@ -207,7 +207,7 @@ its own next Sunday. Self-healing, and the right size of response.
 
 ## 7. Documentation
 
-**`tvbf-backend/docs/specs/NEU-1112-recommendations-page-contract.md`** — the
+**`docs/specs/NEU-1112-recommendations-page-contract.md`** — the
 frontend cites this by URL and must not re-implement the rule. §4 ("The cap and
 the filters are the server's") gains the suppression: the list is *the top twelve
 stored suggestions the viewer has no record for*, with the four sources named so
@@ -215,7 +215,7 @@ NEU-1176's author knows which actions warrant a refetch, and a note that ranks
 stay non-contiguous and that fewer than twelve is normal. §5's "no dismissal"
 line stays as it is — that is NEU-1178's to change.
 
-**`tvbf-backend/.claude/CLAUDE.md`** (D6) — `exclusion.py` in the
+**`.claude/CLAUDE.md`** (D6) — `exclusion.py` in the
 `recommendations/` module map, and a non-obvious-pattern entry recording that the
 never-recommend rule is enforced **twice**, at write time and at read time, from
 one definition, so a fifth source added to `exclusion.py` changes both. No ADR:

@@ -4,8 +4,9 @@ from decimal import Decimal
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import AfterValidator, BaseModel, BeforeValidator, EmailStr, Field, field_validator
+from pydantic import AfterValidator, BeforeValidator, EmailStr, Field, field_validator
 
+from tvbf.api_schema import ApiSchema
 from tvbf.app.handles import RESERVED_HANDLES
 from tvbf.app.models import User
 from tvbf.catalog.schemas import EpisodeOut, ShowSummary
@@ -132,7 +133,7 @@ ActivityVerb = Literal[
 ActivityTargetType = Literal["show", "season", "episode"]
 
 
-class SignupRequest(BaseModel):
+class SignupRequest(ApiSchema):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
     display_name: DisplayName = Field(min_length=1, max_length=100)
@@ -147,21 +148,21 @@ class SignupRequest(BaseModel):
     turnstile_token: str | None = Field(default=None, max_length=2048)
 
 
-class LoginRequest(BaseModel):
+class LoginRequest(ApiSchema):
     email: EmailStr
     password: str
 
 
-class PasswordChangeRequest(BaseModel):
+class PasswordChangeRequest(ApiSchema):
     current_password: str
     new_password: str = Field(min_length=8, max_length=128)
 
 
-class AccountDeleteRequest(BaseModel):
+class AccountDeleteRequest(ApiSchema):
     password: str
 
 
-class SessionSummary(BaseModel):
+class SessionSummary(ApiSchema):
     id: str
     device_label: str
     ip: str | None
@@ -170,13 +171,13 @@ class SessionSummary(BaseModel):
     is_current: bool
 
 
-class MeUpdateRequest(BaseModel):
+class MeUpdateRequest(ApiSchema):
     """Body for PATCH /me. Only carries display_name today."""
 
     display_name: DisplayName = Field(min_length=1, max_length=80)
 
 
-class HandleUpdateRequest(BaseModel):
+class HandleUpdateRequest(ApiSchema):
     """Body for `PATCH /me/handle` (NEU-1163 §6.2).
 
     Its own request and its own route rather than a second field on
@@ -188,7 +189,7 @@ class HandleUpdateRequest(BaseModel):
     handle: Handle
 
 
-class UserOut(BaseModel):
+class UserOut(ApiSchema):
     id: UUID
     email: str
     display_name: str
@@ -230,7 +231,7 @@ class AuthedUserOut(UserOut):
         )
 
 
-class AdminUserOut(BaseModel):
+class AdminUserOut(ApiSchema):
     id: UUID
     email: str
     display_name: str
@@ -244,7 +245,7 @@ class AdminUserOut(BaseModel):
     disabled_at: datetime | None
 
 
-class AdminReportUserRef(BaseModel):
+class AdminReportUserRef(ApiSchema):
     """One party to a report (NEU-1197 §3).
 
     No `email`. An admin who needs it has `GET /admin/users`, which already
@@ -263,7 +264,7 @@ class AdminReportUserRef(BaseModel):
     disabled_at: datetime | None
 
 
-class AdminReportOut(BaseModel):
+class AdminReportOut(ApiSchema):
     """One row of the admin report queue (NEU-1197 §3).
 
     **Nested refs, not flat prefixes.** `AdminUserOut` is flat because it *is*
@@ -289,7 +290,7 @@ class AdminReportOut(BaseModel):
     created_at: datetime
 
 
-class AdminReportPage(BaseModel):
+class AdminReportPage(ApiSchema):
     """`ShowListPage`'s shape, which is the only pagination vocabulary this API
     has. `total` is load-bearing rather than decorative: without it
     `?reported_user_id=X` reports a count only while it fits under the page cap,
@@ -303,15 +304,15 @@ class AdminReportPage(BaseModel):
     total_pages: int
 
 
-class AdminUserUpdateRequest(BaseModel):
+class AdminUserUpdateRequest(ApiSchema):
     is_admin: bool
 
 
-class AdminUserDisabledUpdateRequest(BaseModel):
+class AdminUserDisabledUpdateRequest(ApiSchema):
     disabled: bool
 
 
-class MePreferencesUpdate(BaseModel):
+class MePreferencesUpdate(ApiSchema):
     """Body for PATCH /me/preferences. Fields are optional (partial update)."""
 
     activity_feed_enabled: bool | None = None
@@ -322,41 +323,41 @@ class MePreferencesUpdate(BaseModel):
     notify_revived: bool | None = None
 
 
-class HideFromActivityUpdate(BaseModel):
+class HideFromActivityUpdate(ApiSchema):
     """Body for PATCH /me/shows/{show_id}/hide-from-activity."""
 
     hide_from_activity: bool
 
 
-class ShowMuteUpdate(BaseModel):
+class ShowMuteUpdate(ApiSchema):
     """Body for PATCH /me/shows/{show_id}/mute (NEU-1490)."""
 
     muted: bool
 
 
-class VerifyEmailRequest(BaseModel):
+class VerifyEmailRequest(ApiSchema):
     token: str = Field(min_length=1, max_length=512)
 
 
-class EmailChangeRequest(BaseModel):
+class EmailChangeRequest(ApiSchema):
     new_email: EmailStr
     current_password: str
 
 
-class EmailChangeConfirmRequest(BaseModel):
+class EmailChangeConfirmRequest(ApiSchema):
     token: str = Field(min_length=1, max_length=512)
 
 
-class ForgotPasswordRequest(BaseModel):
+class ForgotPasswordRequest(ApiSchema):
     email: EmailStr
 
 
-class ResetPasswordRequest(BaseModel):
+class ResetPasswordRequest(ApiSchema):
     token: str = Field(min_length=1, max_length=512)
     new_password: str = Field(min_length=8, max_length=128)
 
 
-class MyShowEntry(BaseModel):
+class MyShowEntry(ApiSchema):
     show: ShowSummary
     watched_episode_count: int
     total_episode_count: int
@@ -372,7 +373,7 @@ class MyShowEntry(BaseModel):
     muted: bool = False
 
 
-class WatchNextEntry(BaseModel):
+class WatchNextEntry(ApiSchema):
     show: ShowSummary
     episode: EpisodeOut
     last_watched_at: datetime | None = None
@@ -383,7 +384,7 @@ class WatchNextEntry(BaseModel):
     added_at: datetime | None = None
 
 
-class UpcomingEntry(BaseModel):
+class UpcomingEntry(ApiSchema):
     show: ShowSummary
     episode: EpisodeOut
     watched_episode_count: int
@@ -392,7 +393,7 @@ class UpcomingEntry(BaseModel):
     added_at: datetime | None = None
 
 
-class UpcomingSeasonEntry(BaseModel):
+class UpcomingSeasonEntry(ApiSchema):
     show: ShowSummary
     season_number: int
     season_name: str | None = None
@@ -400,18 +401,18 @@ class UpcomingSeasonEntry(BaseModel):
     added_at: datetime | None = None
 
 
-class UpcomingShowEntry(BaseModel):
+class UpcomingShowEntry(ApiSchema):
     show: ShowSummary
     premiere_date: date | None = None
     added_at: datetime | None = None
 
 
-class EpisodeWatchOut(BaseModel):
+class EpisodeWatchOut(ApiSchema):
     episode_id: int
     watched_at: datetime
 
 
-class WatchedEntry(BaseModel):
+class WatchedEntry(ApiSchema):
     """One show with watch history, for a library's Watched tab.
 
     **`my_rating` is the row owner's rating, not the requester's** (NEU-1191).
@@ -441,11 +442,11 @@ class WatchedEntry(BaseModel):
     my_rating: float | None = None
 
 
-class BulkSeasonResult(BaseModel):
+class BulkSeasonResult(ApiSchema):
     marked: int
 
 
-class SeasonProgress(BaseModel):
+class SeasonProgress(ApiSchema):
     season: int
     aired: int
     watched: int
@@ -480,7 +481,7 @@ class RecommendationOut(ShowSummary):
     rank: int
 
 
-class RecommendationsOut(BaseModel):
+class RecommendationsOut(ApiSchema):
     """The `GET /me/recommendations` body.
 
     An object rather than a bare array, and an **empty list rather than a 204**:
@@ -492,7 +493,7 @@ class RecommendationsOut(BaseModel):
     recommendations: list[RecommendationOut] = []
 
 
-class RecommendationsRunRequest(BaseModel):
+class RecommendationsRunRequest(ApiSchema):
     """The optional body of `POST /admin/recommendations` (NEU-1110).
 
     `user_id` narrows the run to one account, which is the reason the endpoint
@@ -504,11 +505,11 @@ class RecommendationsRunRequest(BaseModel):
     user_id: UUID | None = None
 
 
-class InviteCreateRequest(BaseModel):
+class InviteCreateRequest(ApiSchema):
     email_hint: EmailStr | None = None
 
 
-class InviteOut(BaseModel):
+class InviteOut(ApiSchema):
     code: str
     email_hint: str | None
     created_at: datetime
@@ -520,13 +521,13 @@ class InviteOut(BaseModel):
 ConnectionState = Literal["pending", "accepted", "blocked"]
 
 
-class UserBrief(BaseModel):
+class UserBrief(ApiSchema):
     id: UUID
     display_name: str
     handle: str
 
 
-class UserSearchResult(BaseModel):
+class UserSearchResult(ApiSchema):
     """One row of `GET /users/search`.
 
     Keeps `display_name` beside the handle. Returning the handle alone would be
@@ -540,11 +541,11 @@ class UserSearchResult(BaseModel):
     handle: str
 
 
-class ConnectionRequestCreate(BaseModel):
+class ConnectionRequestCreate(ApiSchema):
     addressee_id: UUID
 
 
-class ConnectionRequestOut(BaseModel):
+class ConnectionRequestOut(ApiSchema):
     id: UUID
     requester: UserBrief
     addressee: UserBrief
@@ -553,22 +554,22 @@ class ConnectionRequestOut(BaseModel):
     responded_at: datetime | None
 
 
-class ConnectionRequestList(BaseModel):
+class ConnectionRequestList(ApiSchema):
     incoming: list[ConnectionRequestOut]
     outgoing: list[ConnectionRequestOut]
 
 
-class ConnectionOut(BaseModel):
+class ConnectionOut(ApiSchema):
     user: UserBrief
     since: datetime
 
 
-class BlockedUserOut(BaseModel):
+class BlockedUserOut(ApiSchema):
     user: UserBrief
     blocked_at: datetime
 
 
-class ShowFriendActivity(BaseModel):
+class ShowFriendActivity(ApiSchema):
     in_my_shows: list[UserBrief]
     watched: list[UserBrief]
 
@@ -576,7 +577,7 @@ class ShowFriendActivity(BaseModel):
 _VALID_STARS = {Decimal("0.5") * i for i in range(1, 11)}
 
 
-class ShowRatingIn(BaseModel):
+class ShowRatingIn(ApiSchema):
     stars: Decimal
 
     @field_validator("stars")
@@ -587,7 +588,7 @@ class ShowRatingIn(BaseModel):
         return v
 
 
-class ShowRatingOut(BaseModel):
+class ShowRatingOut(ApiSchema):
     show_id: int
     stars: float
     rated_at: datetime
@@ -597,13 +598,13 @@ class EpisodeRatingIn(ShowRatingIn):
     pass
 
 
-class EpisodeRatingOut(BaseModel):
+class EpisodeRatingOut(ApiSchema):
     episode_id: int
     stars: float
     rated_at: datetime
 
 
-class FriendRatingItem(BaseModel):
+class FriendRatingItem(ApiSchema):
     user_id: UUID
     display_name: str
     handle: str
@@ -611,7 +612,7 @@ class FriendRatingItem(BaseModel):
     rated_at: datetime
 
 
-class FriendRatingsResponse(BaseModel):
+class FriendRatingsResponse(ApiSchema):
     avg: float | None
     count: int
     items: list[FriendRatingItem]
@@ -628,12 +629,12 @@ FeedKind = Literal[
 ]
 
 
-class ShowMini(BaseModel):
+class ShowMini(ApiSchema):
     id: int
     name: str
 
 
-class EpisodeMini(BaseModel):
+class EpisodeMini(ApiSchema):
     id: int
     name: str | None
     season: int
@@ -643,7 +644,7 @@ class EpisodeMini(BaseModel):
     number: int | None
 
 
-class FeedItem(BaseModel):
+class FeedItem(ApiSchema):
     id: str
     actor: UserBrief
     kind: FeedKind
@@ -659,7 +660,7 @@ class FeedItem(BaseModel):
     occurred_at: datetime
 
 
-class FeedPage(BaseModel):
+class FeedPage(ApiSchema):
     items: list[FeedItem]
     next_cursor: str | None
 
@@ -678,12 +679,12 @@ def _require_https(v: str) -> str:
     return v
 
 
-class PushSubscriptionKeys(BaseModel):
+class PushSubscriptionKeys(ApiSchema):
     p256dh: str = Field(min_length=1, max_length=256)
     auth: str = Field(min_length=1, max_length=256)
 
 
-class PushSubscriptionIn(BaseModel):
+class PushSubscriptionIn(ApiSchema):
     """`PushSubscription.toJSON()` as the browser produces it. `expirationTime`
     rides along and is ignored — no push service in use sets it."""
 
@@ -691,11 +692,11 @@ class PushSubscriptionIn(BaseModel):
     keys: PushSubscriptionKeys
 
 
-class PushSubscriptionCreated(BaseModel):
+class PushSubscriptionCreated(ApiSchema):
     id: UUID
 
 
-class PushSubscriptionOut(BaseModel):
+class PushSubscriptionOut(ApiSchema):
     """One device in the Settings list. Never the endpoint or the keys: the
     endpoint is a capability URL, and the SPA has no use for either."""
 
@@ -705,7 +706,7 @@ class PushSubscriptionOut(BaseModel):
     last_success_at: datetime | None
 
 
-class PushStatsDay(BaseModel):
+class PushStatsDay(ApiSchema):
     """One UTC day of `app.push_delivery`. `retired` is the subset of `failed`
     that retired its subscription (`error` 'gone' or 'failure_limit')."""
 
@@ -715,7 +716,7 @@ class PushStatsDay(BaseModel):
     retired: int
 
 
-class PushStatsOut(BaseModel):
+class PushStatsOut(ApiSchema):
     """`GET /admin/push/stats` (NEU-1493, spec §5.4): the live subscription
     totals, and the last 30 days oldest first, zero-filled."""
 
@@ -724,11 +725,11 @@ class PushStatsOut(BaseModel):
     by_day: list[PushStatsDay]
 
 
-class PushTestIn(BaseModel):
+class PushTestIn(ApiSchema):
     subscription_id: UUID
 
 
-class PushTestOut(BaseModel):
+class PushTestOut(ApiSchema):
     """The outcome of `POST /me/push/test`, reported rather than hidden behind
     the 202 (NEU-1486). `status_code` is the push service's answer, or `None`
     when it never answered (a transport error)."""

@@ -1,9 +1,11 @@
 import { apiFetch } from "@/api/client";
+import type { PushSubscriptionCreated } from "@/api/types";
 
 /** Where this browser stands on Web Push (push-notifications project spec
  * §6.2). The Settings Notifications section renders one state line per value
  * (§6.3). */
-export type PushSupportState = "unsupported" | "ios_needs_install" | "denied" | "prompt" | "granted";
+export type PushSupportState =
+  "unsupported" | "ios_needs_install" | "denied" | "prompt" | "granted";
 
 /** iPhone, iPod or iPad — including the iPadOS default of a desktop Mac user
  * agent, which only a touch-capable "Mac" gives away. */
@@ -64,7 +66,7 @@ export async function currentSubscription(): Promise<PushSubscription | null> {
  * goes stale the moment the worker's `pushsubscriptionchange` re-registers
  * under a new endpoint. Only ever called from a user's action. */
 export async function registerSubscription(subscription: PushSubscription): Promise<string> {
-  const { id } = await apiFetch<{ id: string }>("/me/push/subscriptions", {
+  const { id } = await apiFetch<PushSubscriptionCreated>("/me/push/subscriptions", {
     method: "POST",
     body: JSON.stringify(subscription.toJSON()),
   });

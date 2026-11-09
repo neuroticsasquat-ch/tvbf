@@ -9,19 +9,9 @@ import {
   type PushSupportState,
 } from "@/lib/push";
 import { ApiError, apiFetch } from "./client";
+import type { PushSubscriptionSummary, PushTestResult, VapidPublicKey } from "./types";
 
-export interface PushSubscriptionSummary {
-  id: string;
-  user_agent: string | null;
-  created_at: string;
-  last_success_at: string | null;
-}
-
-/** `POST /me/push/test`'s 202 body: the outcome, not a bare accepted (§5.4). */
-export interface PushTestResult {
-  status: "sent" | "failed";
-  status_code: number | null;
-}
+export type { PushSubscriptionSummary, PushTestResult };
 
 /** This browser's side of push: where it stands and whether it holds a live
  * subscription. Browser state, not server state, so it has its own key. */
@@ -34,7 +24,7 @@ const MY_SUBSCRIPTIONS_KEY = ["me-push-subscriptions"];
 const DEVICE_KEY = ["push-device"];
 
 export const fetchVapidKey = () =>
-  apiFetch<{ public_key: string }>("/push/vapid-public-key").then((r) => r.public_key);
+  apiFetch<VapidPublicKey>("/push/vapid-public-key").then((r) => r.public_key);
 
 /** A 503 from the key route: the server is not configured for push. */
 export function isPushUnavailable(e: unknown): boolean {

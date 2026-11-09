@@ -5,7 +5,7 @@
 **Repo:** `tvbf-frontend`
 **Project:** TVBF: Maintenance
 **Blocked by:** [NEU-1178](https://linear.app/neuroticsasquatch/issue/NEU-1178/backend-dismiss-a-recommendation-and-add-it-to-the-do-not-recommend) — **Done**, `tvbf-backend` PR #308
-**Contract doc:** `tvbf-backend/docs/specs/NEU-1112-recommendations-page-contract.md` §4.1, §5.1
+**Contract doc:** `docs/specs/NEU-1112-recommendations-page-contract.md` §4.1, §5.1
 **Sibling, shipped:** [NEU-1176](https://linear.app/neuroticsasquatch/issue/NEU-1176/frontend-refresh-the-recommendations-grid-after-adding-a-show) — `docs/specs/NEU-1176-refresh-the-recommendations-grid.md`, which built the containment seam and the emptying latch this ticket reuses
 **Project spec:** `docs/specs/tvbf-personalized-recommendations-project-spec.md` (umbrella) §7, §8, §11
 **Status:** approved for implementation

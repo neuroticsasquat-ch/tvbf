@@ -16,9 +16,10 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import EmailStr, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tvbf.api_schema import ApiSchema
 from tvbf.app.services import auth_throttle
 from tvbf.client_ip import client_ip
 from tvbf.config import Settings, get_settings
@@ -33,7 +34,7 @@ log = logging.getLogger(__name__)
 router = APIRouter(tags=["contact"])
 
 
-class ContactIn(BaseModel):
+class ContactIn(ApiSchema):
     name: str = Field(min_length=1, max_length=100)
     email: EmailStr = Field(max_length=254)
     message: str = Field(min_length=1, max_length=5000)

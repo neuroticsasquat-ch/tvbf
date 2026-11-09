@@ -3,9 +3,9 @@
 **Ticket:** [NEU-1513](https://linear.app/neuroticsasquatch/issue/NEU-1513/add-popularity-if-available-as-default-show-search-sort-option)
 **Repo:** `tvbf-frontend` — branch `tom/neu-1513-add-popularity-if-available-as-default-show-search-sort` from `main`
 **Project:** tvbf: Maintenance
-**Other half:** `tvbf-backend/docs/specs/NEU-1513-popularity-sort.md` (the `popularity` / `-popularity` sort keys, the index, and the people order). **This half depends on that one**: until the API accepts `sort=-popularity` it answers 422, so merge the backend PR first. The people-order change needs nothing from this repo — the overlay renders people in whatever order `/people` returns.
+**Other half:** `docs/specs/NEU-1513-popularity-sort.md` (the `popularity` / `-popularity` sort keys, the index, and the people order). **This half depends on that one**: until the API accepts `sort=-popularity` it answers 422, so merge the backend PR first. The people-order change needs nothing from this repo — the overlay renders people in whatever order `/people` returns.
 **Precedents this consumes:** `src/components/SearchOverlay.tsx` (`SEARCH_SORTS`, the `usePersistedSort("search", …)` call), `src/hooks/usePersistedSort.ts` (validated localStorage; `.claude/CLAUDE.md` §"Sort + filter state is persisted"), `docs/specs/NEU-1502-search-running-indicator.md` §2 (what the overlay owns)
-**Glossary:** `tvbf-backend/CONTEXT.md` — **Popularity**: use that word; the glossary reserves "popular" for the friend-scoped list and "trending" for TMDB's weekly ranking, so neither may appear on this control.
+**Glossary:** `CONTEXT.md` — **Popularity**: use that word; the glossary reserves "popular" for the friend-scoped list and "trending" for TMDB's weekly ranking, so neither may appear on this control.
 **Status:** approved for implementation
 
 ---

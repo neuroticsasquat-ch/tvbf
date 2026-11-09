@@ -4,13 +4,13 @@
 **Repos:** `tvbf-backend` (§3 ingest, §4 contract) and `tvbf-frontend` (§5 pages) — branch `tom/neu-1512-list-full-episode-cast` from `main` in each. Three PRs in order: backend ingest, backend routes, SPA (§6).
 **Project:** tvbf: Maintenance
 **Absorbs:** NEU-1514 (per-season regulars), which this spec makes phase one rather than a follow-up
-**Precedents this consumes:** `src/tvbf/tmdb/credits_backfill.py` + `jobs/credits_backfill.py` (the resumable per-show backfill this copies), `src/tvbf/tmdb/upsert.py` `_write_episode_credits` / `_refresh_scope` / `_write_season_networks` (the None-vs-`[]` rule and the season-scoped replace), `src/tvbf/tmdb/client.py` `plan_append` (the 20-entry append budget), `scripts/probe_tmdb_episode_credits_append.py` (the probe this copies), ADR-0007 (per-show character interning, one `crew_role` vocabulary), `docs/specs/NEU-1031-tmdb-coverage-audit.md` (which skipped `credits` and, with it, season credits), `tvbf-frontend/docs/specs/NEU-1209`, `NEU-1210`, `NEU-1211`, `NEU-1007` (the tab and grouping patterns this reshapes)
+**Precedents this consumes:** `src/tvbf/tmdb/credits_backfill.py` + `jobs/credits_backfill.py` (the resumable per-show backfill this copies), `src/tvbf/tmdb/upsert.py` `_write_episode_credits` / `_refresh_scope` / `_write_season_networks` (the None-vs-`[]` rule and the season-scoped replace), `src/tvbf/tmdb/client.py` `plan_append` (the 20-entry append budget), `scripts/probe_tmdb_episode_credits_append.py` (the probe this copies), ADR-0007 (per-show character interning, one `crew_role` vocabulary), `docs/specs/NEU-1031-tmdb-coverage-audit.md` (which skipped `credits` and, with it, season credits), `docs/specs/NEU-1209`, `NEU-1210`, `NEU-1211`, `NEU-1007` (the tab and grouping patterns this reshapes)
 **Glossary:** `CONTEXT.md` — **Regular credit**, **Series crew credit**, **Season cast** (added by this design session); **Cast credit**, **Crew credit**, **Guest credit**, **Billing order**, **Filmography**, **Credit group** amended
 **Status:** approved for implementation. §3.1's probe ran 2026-09-30 and chose **Route A** (§3.2): `season/N/credits` rides the series append, identical to the standalone response on all 8 probed seasons; the standalone season takes `append_to_response=credits`; 0 of 32 regulars lacked `id`/`name` (too few to go strict — §3.3 stays lenient). PR 1 (ingest) implements §3.
 
 This spec lives in `tvbf-backend/docs/specs/` because it is a cross-repo
 contract: §4 changes the credit routes the SPA reads and §5 is written against
-§4. `tvbf-frontend/docs/specs/NEU-1512-list-full-episode-cast.md` is a pointer.
+§4. `docs/specs/NEU-1512-list-full-episode-cast-frontend.md` is a pointer.
 
 ---
 
@@ -609,7 +609,7 @@ Season 3" → `/shows/{show_id}/episodes?season=3&tab=cast`. Season 0 reads
 - `docs/migration/README.md` — the production backfill run, date and totals.
 - `docs/specs/NEU-1031-tmdb-coverage-audit.md` — a note beside the skipped
   `credits` row that season credits were adopted by NEU-1512.
-- `tvbf-frontend/docs/specs/NEU-1512-list-full-episode-cast.md` — pointer.
+- `docs/specs/NEU-1512-list-full-episode-cast-frontend.md` — pointer.
   NEU-1209, NEU-1210, NEU-1211 and NEU-1007 each get a one-line note that
   NEU-1512 reshaped the tabs or grouping they describe.
 
