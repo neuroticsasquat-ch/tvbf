@@ -17,9 +17,10 @@ undo the commit-then-notify contract; the client is read off app state and
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel, Field
+from pydantic import Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tvbf.api_schema import ApiSchema
 from tvbf.app.errors import NotFound, SelfReportForbidden, TooManyAttempts
 from tvbf.app.models import User
 from tvbf.app.services import report_service
@@ -30,7 +31,7 @@ from tvbf.integrations.linear import LinearClient
 router = APIRouter(tags=["reports"])
 
 
-class ReportIn(BaseModel):
+class ReportIn(ApiSchema):
     """Beside its route rather than in `app/schemas.py`, mirroring `FeedbackIn`
     — the shape this one is deliberately matched to. NEU-1162's *other* new
     body, `AdminUserDisabledUpdateRequest`, sits in `schemas.py` because

@@ -10,9 +10,9 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, status
-from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tvbf.api_schema import ApiSchema
 from tvbf.app.errors import NotFound, TooManyAttempts
 from tvbf.app.models import User
 from tvbf.app.repos import push_subscription_repo
@@ -30,7 +30,7 @@ from tvbf.deps import get_current_user, get_session, require_csrf
 router = APIRouter(tags=["push"])
 
 
-class VapidPublicKeyOut(BaseModel):
+class VapidPublicKeyOut(ApiSchema):
     public_key: str
 
 

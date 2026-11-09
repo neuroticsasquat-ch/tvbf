@@ -6,17 +6,20 @@ import { offerPushNudge } from "@/lib/pushNudge";
 import { localToday } from "./today";
 import type {
   AuthedUser,
+  BulkSeasonResult,
   EpisodeOut,
+  EpisodeRating,
   EpisodeWatchOut,
   FeedPage,
   MyShowEntry,
   MyShowsSort,
   PopularWithFriends,
   PreferencesPatch,
-  Rating,
   RecommendationsResponse,
+  SeasonProgress,
   ShowDetail,
   ShowListPage,
+  ShowRating,
   UpcomingEntry,
   UpcomingSeasonEntry,
   UpcomingShowEntry,
@@ -124,12 +127,6 @@ export function useMyWatched(enabled = true) {
     queryFn: fetchMyWatched,
     enabled,
   });
-}
-
-export interface SeasonProgress {
-  season: number;
-  aired: number;
-  watched: number;
 }
 
 export function useSeasonProgress(showId: number, enabled = true) {
@@ -401,7 +398,7 @@ export function useMarkSeason() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (vars: { showId: number; season: number }) =>
-      apiFetch<{ marked: number }>(`/me/shows/${vars.showId}/season/${vars.season}/watched`, {
+      apiFetch<BulkSeasonResult>(`/me/shows/${vars.showId}/season/${vars.season}/watched`, {
         method: "POST",
       }),
     onMutate: async (vars) => {
@@ -443,7 +440,7 @@ export function useMarkShow() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (showId: number) =>
-      apiFetch<{ marked: number }>(`/me/shows/${showId}/watched`, { method: "POST" }),
+      apiFetch<BulkSeasonResult>(`/me/shows/${showId}/watched`, { method: "POST" }),
     onSettled: () => invalidateAll(qc),
   });
 }
@@ -504,12 +501,12 @@ export function useUnmarkShow() {
  * detail; reverts on error; invalidates rating-related caches on settle. */
 export function useShowRating(showId: number) {
   const qc = useQueryClient();
-  return useMutation<Rating | void, Error, number | null, { prev: ShowDetail | undefined }>({
+  return useMutation<ShowRating | void, Error, number | null, { prev: ShowDetail | undefined }>({
     mutationFn: (stars) => {
       if (stars === null) {
         return apiFetch<void>(`/me/shows/${showId}/rating`, { method: "DELETE" });
       }
-      return apiFetch<Rating>(`/me/shows/${showId}/rating`, {
+      return apiFetch<ShowRating>(`/me/shows/${showId}/rating`, {
         method: "PUT",
         body: JSON.stringify({ stars }),
       });
@@ -545,12 +542,12 @@ export function useShowRating(showId: number) {
 /** PUT/DELETE the caller's rating for an episode. */
 export function useEpisodeRating(episodeId: number) {
   const qc = useQueryClient();
-  return useMutation<Rating | void, Error, number | null, { prev: EpisodeOut | undefined }>({
+  return useMutation<EpisodeRating | void, Error, number | null, { prev: EpisodeOut | undefined }>({
     mutationFn: (stars) => {
       if (stars === null) {
         return apiFetch<void>(`/me/episodes/${episodeId}/rating`, { method: "DELETE" });
       }
-      return apiFetch<Rating>(`/me/episodes/${episodeId}/rating`, {
+      return apiFetch<EpisodeRating>(`/me/episodes/${episodeId}/rating`, {
         method: "PUT",
         body: JSON.stringify({ stars }),
       });

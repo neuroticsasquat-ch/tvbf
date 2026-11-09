@@ -64,6 +64,46 @@ jobs:
     with:
       working-directory: frontend
 
+  # Regenerates openapi.json from the app, and frontend/src/api/schema.d.ts from it, and fails if
+  # either changed: a response model that moved without the SPA following it fails here, before
+  # merge (NEU-2261). Gated on either filter, because the drift can start on either side. The same
+  # two steps `task fe:generate` runs, outside the containers: building the app opens no
+  # connection, so there is no database, and the settings it validates come from .github/ci/env.
+  api-types:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # Python comes from .python-version: uv reads it when it syncs.
+      - uses: astral-sh/setup-uv@v10.3.3
+      - run: uv sync --locked
+      # pnpm comes from `packageManager` in frontend/package.json.
+      - uses: pnpm/action-setup@v6.1.1
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version-file: frontend/.node-version
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: frontend
+      - name: openapi.json and frontend/src/api/ are current
+        run: |
+          set -a; . .github/ci/env; set +a
+          uv run python -m tvbf.openapi > openapi.json
+          sh frontend/scripts/generate-api.sh < openapi.json
+          # `status`, not `diff`: it also catches a generated file that is new and untracked.
+          if [ -n "$(git status --porcelain -- openapi.json frontend/src/api/)" ]; then
+            git status --short -- openapi.json frontend/src/api/
+            git diff -- openapi.json frontend/src/api/
+            echo "::error::openapi.json or frontend/src/api/ is stale: run \`task fe:generate\` and commit the result"
+            exit 1
+          fi
+
   # Builds the image Coolify deploys (docker-compose.prod.yml: Dockerfile, target prod) without
   # pushing, and checks it doesn't run as root. Gated with `python`: .dockerignore keeps
   # frontend/ out of the build context, so a frontend-only change can't alter the image.
@@ -78,7 +118,7 @@ jobs:
     if: always()
     # Every other job. `changes` is here too: if it fails, the jobs gated on it are skipped, and
     # the gate passes a skip.
-    needs: [changes, python, js, image]
+    needs: [changes, python, js, api-types, image]
     runs-on: ubuntu-latest
     steps:
       - uses: neuroticsasquat-ch/workflows/actions/gate@v1
