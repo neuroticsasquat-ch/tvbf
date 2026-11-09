@@ -5,7 +5,7 @@
 **Repo:** `tvbf-backend`
 **Project:** TVBF: Maintenance
 **Project spec:** `docs/specs/tvbf-personalized-recommendations-project-spec.md` (umbrella) §8, §9, §13
-**Contract doc:** `tvbf-backend/docs/specs/NEU-1112-recommendations-page-contract.md` (cited by `tvbf-frontend`)
+**Contract doc:** `docs/specs/NEU-1112-recommendations-page-contract.md` (cited by `tvbf-frontend`)
 **Blocked by:** NEU-1175 (shipped — `recommendations/exclusion.py` and the read-time anti-join)
 **Blocks:** NEU-1179 (the frontend control)
 **Base branch:** `main`
@@ -351,7 +351,7 @@ Two placement calls, made deliberately:
 
 ## 13. Documentation
 
-**`tvbf-backend/docs/specs/NEU-1112-recommendations-page-contract.md`** (D7) —
+**`docs/specs/NEU-1112-recommendations-page-contract.md`** (D7) —
 the frontend cites this by URL and NEU-1179 will read it.
 
 * §4.1 is reframed from "a show the viewer already has a record for is
@@ -371,7 +371,7 @@ Everything lands in this one doc rather than a second in-repo contract: §4.1 an
 §5 both have to change regardless, and splitting the endpoint out would leave the
 frontend reading "dismissal does not exist" in one file and its spec in another.
 
-**`tvbf-backend/CONTEXT.md`** — two new entries in the Recommendations section
+**`CONTEXT.md`** — two new entries in the Recommendations section
 and one correction:
 
 * **Never-recommend set** — the five sources, defined once in
@@ -386,7 +386,7 @@ and one correction:
   has a record for" is corrected; `exclude` can now carry a show the user has
   never seen.
 
-**`tvbf-backend/.claude/CLAUDE.md`** —
+**`.claude/CLAUDE.md`** —
 
 * `recommendations/exclusion.py`'s module-map line and the "enforced twice, from
   one definition" non-obvious-pattern entry both name the renamed functions and

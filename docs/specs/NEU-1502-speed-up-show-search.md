@@ -3,7 +3,7 @@
 **Ticket:** [NEU-1502](https://linear.app/neuroticsasquatch/issue/NEU-1502/speed-up-show-search)
 **Repo:** `tvbf-backend` — branch `tom/neu-1502-speed-up-show-search` from `main`
 **Project:** tvbf: Maintenance
-**Other half:** `tvbf-frontend/docs/specs/NEU-1502-search-running-indicator.md` (the spinner and keep-previous-results; independent of this half, same ticket)
+**Other half:** `docs/specs/NEU-1502-search-running-indicator.md` (the spinner and keep-previous-results; independent of this half, same ticket)
 **Precedents this consumes:** `docs/superpowers/specs/2026-05-03-show-akas-search-design.md` (AKA search), `docs/superpowers/specs/2026-06-29-neu-433-search-normalization-design.md` (the fold, and the "defer indexing until measured" clause this spec is the measurement for), `src/tvbf/sql_fold.py` (the one fold), `docs/specs/NEU-1005-tombstone-shows-deleted-upstream.md` / ADR-0005 (tombstones hidden from discovery), NEU-1062 and `tests/integration/app/repos/test_specials_ledger.py` (specials are excluded from aired math)
 **Glossary:** `CONTEXT.md` — **Last aired**, **Short query** (both added by this ticket's design session)
 **Status:** approved for implementation

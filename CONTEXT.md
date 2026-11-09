@@ -1,6 +1,6 @@
 # TV Binge Friend
 
-A web app for tracking TV watching with a social layer, built on a local mirror of an upstream TV catalog. This glossary fixes the vocabulary used across `tvbf-backend`, `tvbf-frontend`, specs, plans and tickets.
+A web app for tracking TV watching with a social layer, built on a local mirror of an upstream TV catalog. This glossary fixes the vocabulary used across the backend, the frontend (`frontend/`), specs, plans and tickets.
 
 **The upstream source is changing.** TMDB replaces TV Maze as the catalog source (ADR-0007), and the mirror moves from the `tvmaze` schema to a source-neutral `catalog` schema. Entries below marked _(transitional)_ describe vocabulary that is TV Maze-specific and retires with it.
 
@@ -282,3 +282,29 @@ _Avoid_: unfollow, snooze, silence
 **Revived**:
 A tracked show whose status leaves ended or cancelled — a renewal, an un-cancellation, a network pickup. A catalog event of its own, and **not** a resurrection: resurrection is a tombstoned row reappearing upstream, which says nothing about whether the show is making more episodes.
 _Avoid_: resurrected, renewed (TMDB's vocabulary has no such status; the event is the transition), un-cancelled
+
+### Brand
+
+**Mark**:
+The amber television drawing — set, feet, antennae, navy screen reading "TVBF" — on its own, with no background.
+_Avoid_: logo, icon, glyph
+
+**Tile**:
+The mark centred on a rounded navy square. The favicon and the PWA icons are tiles; the header is not.
+_Avoid_: app icon, badge
+
+**Wordmark**:
+The words "TV BingeFriend" in the brand font, "TV" in brand amber and "TV" and "Binge" in the heavier weight.
+_Avoid_: title, site name, logotype
+
+**Lockup**:
+The mark and the wordmark drawn together, in one of a fixed set of sizes. The header and the login hero each show one.
+_Avoid_: logo, banner, header brand
+
+**Brand amber**:
+The one accent colour the brand owns, used by the mark and by the wordmark's "TV" and nowhere else.
+_Avoid_: primary, accent, orange, gold
+
+**Short name**:
+"TVBF" — the app's name where "TV BingeFriend" will not fit, chiefly the home-screen label (the manifest's `short_name` and iOS's `apple-mobile-web-app-title`). The product has two names, the full one and this; there is no third.
+_Avoid_: BingeFriend

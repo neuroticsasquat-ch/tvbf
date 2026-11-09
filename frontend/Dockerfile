@@ -7,7 +7,10 @@ RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 WORKDIR /app
 
 FROM base AS deps
-COPY package.json pnpm-lock.yaml* ./
+# The workspace manifest and its one member's package.json too (pnpm-workspace.yaml), or the
+# frozen install finds a lockfile importer it has no package for.
+COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml ./
+COPY tools/openapi-types/package.json tools/openapi-types/
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile || pnpm install
 
