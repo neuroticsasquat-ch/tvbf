@@ -5,7 +5,7 @@
 **Repo:** `tvbf-frontend`
 **Project:** TVBF: Maintenance
 **Blocked by:** [NEU-1175](https://linear.app/neuroticsasquatch/issue/NEU-1175/backend-suppress-recommendations-for-shows-now-in-my-shows) — **Done**, `tvbf-backend` PR #307
-**Contract doc:** `tvbf-backend/docs/specs/NEU-1112-recommendations-page-contract.md` §4.1 (the server-side rule this is the client half of)
+**Contract doc:** `docs/specs/NEU-1112-recommendations-page-contract.md` §4.1 (the server-side rule this is the client half of)
 **Project spec:** `docs/specs/tvbf-personalized-recommendations-project-spec.md` (umbrella) §8, §9, §11
 **Sibling:** [NEU-1179](https://linear.app/neuroticsasquatch/issue/NEU-1179/frontend-a-remove-control-on-a-recommendation-card) — the dismiss control, which reuses the containment seam built here
 **Status:** approved for implementation

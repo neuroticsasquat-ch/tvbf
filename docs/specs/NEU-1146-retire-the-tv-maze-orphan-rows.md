@@ -491,13 +491,13 @@ field *names*, not TV Maze data, and no licence condition attaches to them.
 
 ## 10. Documentation to update
 
-* **`tvbf-backend/docs/adr/0012-*.md`** — the reversal (§1).
+* **`docs/adr/0012-*.md`** — the reversal (§1).
 * **`docs/migration/README.md`** — a run-log row for this pass, and a runbook
   section covering the report-first ordering, the expected reconciliation
   discrepancies, and the fact that this is **not reversible**: the pre-drop
   `tvmaze` dump is the only source for the deleted rows, and it cannot restore
   `app` rows at all.
-* **`tvbf-backend/.claude/CLAUDE.md`** — the DB-topology section (no more
+* **`.claude/CLAUDE.md`** — the DB-topology section (no more
   `tmdb_id IS NULL` rows in the spine), the migration-operations list (the new
   task), and the non-obvious-patterns entries that currently describe orphan rows
   as permanent residue: the copied-special negative-numbering entry, the

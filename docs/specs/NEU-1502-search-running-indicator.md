@@ -3,7 +3,7 @@
 **Ticket:** [NEU-1502](https://linear.app/neuroticsasquatch/issue/NEU-1502/speed-up-show-search)
 **Repo:** `tvbf-frontend` — branch `tom/neu-1502-speed-up-show-search` from `main`
 **Project:** tvbf: Maintenance
-**Other half:** `tvbf-backend/docs/specs/NEU-1502-speed-up-show-search.md` (the query rewrite and stored last-aired date). The two halves are independent: this one ships against today's API unchanged and is not blocked by the backend PR.
+**Other half:** `docs/specs/NEU-1502-speed-up-show-search.md` (the query rewrite and stored last-aired date). The two halves are independent: this one ships against today's API unchanged and is not blocked by the backend PR.
 **Precedents this consumes:** `docs/specs/NEU-1192-a-my-shows-control-on-search-results.md` §3.3 (the `["shows"]` optimistic flip and its `onSettled` refetch — the thing the indicator must *not* light on), `src/components/connections/FindPeople.tsx` (the nearest existing "Searching…" state), `src/hooks/useDebouncedValue.ts` (why the first keystroke is debounced), `docs/superpowers/specs/2026-04-19-frontend-mvp-design.md` §Loading ("skeletons, no spinners" — superseded for the search box only, below)
 **Status:** approved for implementation
 

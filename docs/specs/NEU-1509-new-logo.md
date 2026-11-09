@@ -4,7 +4,7 @@
 **Repo:** `tvbf-frontend` — branch `tom/neu-1509-new-logo` from `main`
 **Project:** tvbf: Maintenance
 **Source assets:** `~/tvbf-icons/` on the workspace that planned this (not in any repo — see §4.1 for what gets committed)
-**Precedents this consumes:** `src/components/SasquatchMark.tsx` (why a mark is inlined rather than served from `public/`), `src/components/ShowPoster.tsx` and `src/components/UserIdentity.tsx` (`size` is a variant, never a `className`), `src/manifest.test.ts` (what pins the icon set), `tvbf-backend/docs/specs/tvbf-push-notifications-project-spec.md` §6.1 (the manifest and icon contract this must keep satisfying)
+**Precedents this consumes:** `src/components/SasquatchMark.tsx` (why a mark is inlined rather than served from `public/`), `src/components/ShowPoster.tsx` and `src/components/UserIdentity.tsx` (`size` is a variant, never a `className`), `src/manifest.test.ts` (what pins the icon set), `docs/specs/tvbf-push-notifications-project-spec.md` §6.1 (the manifest and icon contract this must keep satisfying)
 **Vocabulary:** `CONTEXT.md` § Brand
 **Status:** approved for implementation
 

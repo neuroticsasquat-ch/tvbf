@@ -3,7 +3,7 @@
 **Ticket:** [NEU-1512](https://linear.app/neuroticsasquatch/issue/NEU-1512/list-full-episode-cast)
 **Repo:** `tvbf-frontend` — branch `tom/neu-1512-list-full-episode-cast` from `main`
 **Project:** tvbf: Maintenance
-**Spec:** `tvbf-backend/docs/specs/NEU-1512-list-full-episode-cast.md` — this file is a pointer, not a second spec
+**Spec:** `docs/specs/NEU-1512-list-full-episode-cast.md` — this file is a pointer, not a second spec
 **Status:** approved for implementation. This is PR 3 of 3; it ships after the backend's ingest (PR 1), the production backfill, and the routes (PR 2).
 
 The spec is a cross-repo contract and therefore lives in `tvbf-backend/docs/specs/`
@@ -22,5 +22,5 @@ Cast / Guest stars / Crew / Episode crew tabs with paged lists, the season page
 (`/shows/:id/episodes?season=N`) an Episodes / Cast / Crew strip, the episode
 page a link to the season's regular cast above its guest cast, and the person
 page two tabs with one card per show, newest credited date first, expandable
-into season and episode rows. Glossary: `tvbf-backend/CONTEXT.md` — *Regular
+into season and episode rows. Glossary: `CONTEXT.md` — *Regular
 credit*, *Series crew credit*, *Season cast*, *Credit group*.
