@@ -78,7 +78,7 @@ jobs:
         with:
           persist-credentials: false
       # Python comes from .python-version: uv reads it when it syncs.
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@v10.4.0
       - run: uv sync --locked
       # pnpm comes from `packageManager` in frontend/package.json.
       - uses: pnpm/action-setup@v6.1.1
