@@ -64,6 +64,25 @@ class ChatUsage(_Upstream):
     completion_tokens: int = 0
 
 
+class ProviderError(_Upstream):
+    """The one field of an error envelope anything here reads.
+
+    `message` is not modelled: the client quotes the whole body in its
+    `LLMRequestFailed`, so nothing needs it apart from that."""
+
+    code: str | None = None
+
+
+class ErrorEnvelope(_Upstream):
+    """The body of a 4xx, as far as `client` needs to read it (NEU-2542).
+
+    `error` is optional so that a body without one reaches the client's own
+    verdict. A body whose `error` is not an object fails validation, and the
+    client reads that as "no code", which is what it is."""
+
+    error: ProviderError | None = None
+
+
 class ChatCompletion(_Upstream):
     """One chat-completions response.
 

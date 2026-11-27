@@ -16,6 +16,7 @@ from tvbf.llm.client import OpenAICompatClient, _budget
 from tvbf.llm.registry import DEEPINFRA
 from tvbf.llm.retry import RetryPolicy
 from tvbf.llm.types import (
+    LLMModelNotFound,
     LLMRequestFailed,
     LLMResponseInvalid,
     Prompt,
@@ -309,6 +310,69 @@ class TestRequestFailure:
                 await client.complete_json(PROMPT)
 
 
+def _not_found(code: str | None = "model_not_found") -> httpx.Response:
+    """A 404 in the shape DeepInfra sent production on 2026-11-27 (NEU-2542)."""
+    error: dict[str, object] = {
+        "message": "The model `deepseek-ai/Some-Model` does not exist",
+        "type": "invalid_request_error",
+        "param": None,
+    }
+    if code is not None:
+        error["code"] = code
+    return httpx.Response(404, json={"error": error})
+
+
+class TestAModelTheProviderDoesNotServe:
+    """NEU-2542. DeepInfra withdrew the model production ran, and every call
+    answered 404. That is not one user's failure: the next user gets the same
+    answer, so it has a class of its own for the weekly pass to stop on."""
+
+    @respx.mock
+    async def test_a_404_naming_the_model_as_missing_is_its_own_failure(self):
+        # Retries allowed, so the call count below is the claim that a withdrawn
+        # model is not asked for twice.
+        route = respx.post(COMPLETIONS).mock(return_value=_not_found())
+
+        async with _client(policy=RetryPolicy(max_retries=2)) as client:
+            with pytest.raises(LLMModelNotFound, match="deepseek-ai/Some-Model"):
+                await client.complete_json(PROMPT)
+
+        assert route.call_count == 1
+
+    def test_it_is_still_a_request_failure(self):
+        """A handler written against `LLMRequestFailed` or `LLMError` keeps
+        catching it; only a caller that asks for it by name treats it apart."""
+        assert issubclass(LLMModelNotFound, LLMRequestFailed)
+
+    @pytest.mark.parametrize(
+        "response",
+        [
+            pytest.param(_not_found(code=None), id="a 404 that names no code"),
+            pytest.param(_not_found(code="not_found"), id="a 404 with another code"),
+            pytest.param(
+                httpx.Response(404, json={"error": "no such model"}),
+                id="a 404 whose error is not an object",
+            ),
+            pytest.param(httpx.Response(404, text="Not Found"), id="a 404 that is not json"),
+            pytest.param(
+                httpx.Response(400, json={"error": {"code": "model_not_found"}}),
+                id="a 400 carrying the code",
+            ),
+        ],
+    )
+    @respx.mock
+    async def test_anything_else_stays_a_plain_request_failure(self, response):
+        """Only the status and the provider's own code together say the model is
+        gone. A bare 404 could be a wrong base URL, which is a different fix."""
+        respx.post(COMPLETIONS).mock(return_value=response)
+
+        async with _client() as client:
+            with pytest.raises(LLMRequestFailed) as raised:
+                await client.complete_json(PROMPT)
+
+        assert not isinstance(raised.value, LLMModelNotFound)
+
+
 class TestRetries:
     @respx.mock
     async def test_a_429_is_retried_and_then_succeeds(self):
@@ -438,6 +502,12 @@ class TestPromptAndConstruction:
             with pytest.raises(UnsupportedPromptError):
                 await client.complete_json(Prompt(system="Answer tersely.", user="as json"))
         assert route.call_count == 0
+
+    def test_the_default_ceiling_leaves_room_past_a_long_answer(self):
+        """NEU-2542: a model measured at about 3,800 output tokens an answer
+        reached exactly 4,096 twice in 34 calls. A reply cut off at the ceiling
+        does not decode, so the default sits well clear of it."""
+        assert Prompt(system="json", user="x").max_tokens == 8192
 
     async def test_a_missing_api_key_raises_at_construction(self):
         with pytest.raises(ValueError, match="DEEPINFRA_API_KEY"):
