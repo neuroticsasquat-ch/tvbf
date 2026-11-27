@@ -1,68 +1,20 @@
 """Scheduled jobs report their own failure to the error tracker, and nothing else (NEU-1622).
 
-The SDK is real and only its transport is fake, so these pin what Bugsink would
-actually receive: the integrations `init_sentry(job=…)` chooses, the
-`pipeline_mode` tag, and the flush before `main()` returns.
+The SDK is real and only its transport is fake (`tests/fixtures/sentry.py`), so
+these pin what Bugsink would actually receive: the integrations
+`init_sentry(job=…)` chooses, the `pipeline_mode` tag, and the flush before
+`main()` returns.
 """
 
 import logging
-from typing import TYPE_CHECKING, Any
 
-import pytest
 import sentry_sdk
-from sentry_sdk.envelope import Envelope
-from sentry_sdk.transport import Transport
 
+from tests.fixtures.sentry import SHA
 from tvbf.config import get_settings
 from tvbf.jobs import raise_test_error
 from tvbf.jobs.scheduled import report_down, scheduled_main
 from tvbf.telemetry import init_sentry
-
-if TYPE_CHECKING:
-    from sentry_sdk._types import Event  # a TypedDict that exists only for type checkers
-
-SHA = "0123456789abcdef0123456789abcdef01234567"
-
-
-class _Captured(Transport):
-    """Holds envelopes until `flush()`, as the real transport's background queue
-    does — so an event `main()` forgot to flush is an event these tests miss."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.queued: list[Envelope] = []
-        self.envelopes: list[Envelope] = []
-
-    def capture_envelope(self, envelope: Envelope) -> None:
-        self.queued.append(envelope)
-
-    def flush(self, timeout: float, callback: Any | None = None) -> None:
-        self.envelopes += self.queued
-        self.queued.clear()
-
-    @property
-    def events(self) -> list["Event"]:
-        return [e for env in self.envelopes if (e := env.get_event()) is not None]
-
-
-@pytest.fixture
-def transport(monkeypatch):
-    """Route the real `sentry_sdk.init` to a transport that keeps what it is sent."""
-    captured = _Captured()
-    real_init = sentry_sdk.init
-    monkeypatch.setattr(sentry_sdk, "init", lambda **kw: real_init(transport=captured, **kw))
-    monkeypatch.setenv("SENTRY_DSN", "https://key@bugsink.example/1")
-    monkeypatch.setenv(
-        "OTEL_RESOURCE_ATTRIBUTES",
-        f"deployment.environment=production,service.version={SHA}",
-    )
-    get_settings.cache_clear()
-    yield captured
-    get_settings.cache_clear()
-    sentry_sdk.get_isolation_scope().remove_tag("pipeline_mode")
-    # Not `init()` again: that reads `SENTRY_DSN` back out of the environment.
-    sentry_sdk.get_client().close()
-    sentry_sdk.get_global_scope().set_client(None)
 
 
 def test_a_job_crash_is_one_event_tagged_with_the_job_and_the_build(transport):

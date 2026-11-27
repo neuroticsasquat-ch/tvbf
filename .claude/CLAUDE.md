@@ -295,7 +295,7 @@ The list route batch-hydrates genres and networks for all shows in a page via a 
 src/tvbf/
   main.py              # app factory, lifespan (stale-run cleanup), CORSMiddleware, root-logger config
   config.py            # Pydantic Settings; env-driven, @lru_cache singleton
-  db.py                # async engine, SessionLocal, Base (DeclarativeBase)
+  db.py                # async engine (`hide_parameters=True`, so a failed statement's message quotes nothing bound to it, NEU-2544), SessionLocal, Base (DeclarativeBase)
   deps.py              # get_session, require_admin (bearer token), get_current_user (cookie session), require_csrf
   openapi.py           # `python -m tvbf.openapi` — the OpenAPI document as the committed `openapi.json` holds it (NEU-2261)
   api_schema.py        # `ApiSchema`, the base of every Pydantic model of our API: defaulted response fields are required in the schema (NEU-2261)
@@ -303,7 +303,7 @@ src/tvbf/
   rate_budget.py       # per-upstream token buckets in Postgres + get_rate_limiter (ADR-0006)
   sql_fold.py          # the one accent/punctuation fold, evaluated in Postgres: folded() + folded_equal()
   client_ip.py         # the one client-address resolution: right-most X-Forwarded-For entry at N trusted hops, validated as an IP (NEU-1160)
-  telemetry.py         # Sentry init + the one release/environment resolution, read back from OTEL_RESOURCE_ATTRIBUTES so Bugsink and SigNoz name the same build (NEU-1589); `record_handled_exception`, the contract's `span.record_exception()` for errors caught and carried past (NEU-1626)
+  telemetry.py         # Sentry init + the one release/environment resolution, read back from OTEL_RESOURCE_ATTRIBUTES so Bugsink and SigNoz name the same build (NEU-1589); `record_handled_exception`, the contract's `span.record_exception()` for errors caught and carried past (NEU-1626); `init_sentry` also turns off three SDK defaults — frame variables, the request body, an unscrubbed `X-CSRF-Token` — because they sent `Settings`, passwords and watch histories (NEU-2544). An exception's own message, breadcrumbs and the query string still go
   routers/
     health.py          # /healthz, /readyz
     auth.py            # /signup, /login, /logout, /password-change + NEU-1160's two gates: the IP throttle on the first two, Turnstile on signup
