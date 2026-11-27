@@ -16,6 +16,7 @@ next person.
 """
 
 import json
+import traceback
 from datetime import date
 
 import httpx
@@ -38,6 +39,7 @@ from tvbf.app.models import (
 from tvbf.catalog.models import Show, ShowAka
 from tvbf.config import get_settings
 from tvbf.db import engine
+from tvbf.jobs import scheduled
 from tvbf.jobs.weekly_recommendations import (
     ADVISORY_LOCK_KEY,
     CONSECUTIVE_FAILURE_LIMIT,
@@ -45,10 +47,12 @@ from tvbf.jobs.weekly_recommendations import (
     run,
     run_pass_if_free,
 )
+from tvbf.llm.types import LLMModelNotFound
 from tvbf.recommendations.payload import GENERATION_FLOOR, PROMPT_VERSION
 
 COMPLETIONS = "https://api.deepinfra.com/v1/openai/chat/completions"
 MODEL = "deepseek-ai/DeepSeek-V4-Pro-0813"
+HEALTHCHECK = "https://hc.example.com/recommendations"
 
 TRACKED = 972_000
 """The first of the shows the user already has, which the payload excludes."""
@@ -608,6 +612,116 @@ class TestIsolationAndGivingUp:
         ).scalar_one()
         assert written == CONSECUTIVE_FAILURE_LIMIT
         assert await _sets(session, accounts[-1].id) == []
+
+
+class TestAModelTheProviderDoesNotServe:
+    """NEU-2542. On 2026-11-27 production's model had been withdrawn at the
+    provider, and the pass read that as three users failing: three `failed` rows
+    and three tracebacks a run, for a cause that was nobody's turn."""
+
+    @pytest.fixture
+    async def two_users(self, session, user, make_user):
+        """A second user over the floor, so "no further user is tried" is a
+        claim about somebody."""
+        second = await make_user(email="second@example.com")
+        session.add_all([UserShowWatch(user_id=second.id, show_id=TRACKED + n) for n in range(10)])
+        await session.commit()
+
+    @staticmethod
+    def _withdrawn():
+        """Every call answers as DeepInfra answered production that day."""
+        return respx.post(COMPLETIONS).mock(
+            return_value=httpx.Response(
+                404,
+                json={
+                    "error": {
+                        "message": f"The model `{MODEL}` does not exist",
+                        "type": "invalid_request_error",
+                        "param": None,
+                        "code": "model_not_found",
+                    }
+                },
+            )
+        )
+
+    @respx.mock
+    async def test_it_stops_the_pass_and_blames_no_user(self, session, two_users, provider):
+        """The second user would get the same answer, so nothing is asked on
+        their behalf, and neither of them is recorded as having failed."""
+        route = self._withdrawn()
+
+        with pytest.raises(LLMModelNotFound, match=MODEL):
+            await run_pass_if_free(get_settings())
+
+        assert route.call_count == 1
+        written = (
+            await session.execute(select(func.count()).select_from(UserRecommendationSet))
+        ).scalar_one()
+        assert written == 0
+
+    @respx.mock
+    async def test_what_it_raises_carries_no_frame_of_the_users_turn(self, two_users, provider):
+        """`run()` hands this exception to the error tracker, which records the
+        local variables of every frame in its traceback. The one the client
+        raised travelled up through the user's turn, whose locals are their
+        payload and the request body built from it."""
+        self._withdrawn()
+
+        with pytest.raises(LLMModelNotFound) as raised:
+            await run_pass_if_free(get_settings())
+
+        frames = {frame.name for frame in traceback.extract_tb(raised.value.__traceback__)}
+        assert "run_pass" in frames
+        assert frames.isdisjoint({"_generate_for_user", "_ask", "_attempt", "complete_json"})
+        # `from None`: the tracker follows `__cause__`, or `__context__` unless
+        # suppressed, and either would lead straight back to those frames.
+        assert raised.value.__cause__ is None
+        assert raised.value.__suppress_context__
+
+    @respx.mock
+    async def test_the_lock_is_released_when_the_pass_raises(self, two_users, provider):
+        """Or the pass that follows a fixed setting would find it held and exit 0
+        having done nothing."""
+        self._withdrawn()
+
+        with pytest.raises(LLMModelNotFound):
+            await run_pass_if_free(get_settings())
+
+        async with engine.connect() as conn:
+            acquired = (
+                await conn.execute(select(func.pg_try_advisory_lock(ADVISORY_LOCK_KEY)))
+            ).scalar_one()
+            assert acquired
+            await conn.execute(select(func.pg_advisory_unlock(ADVISORY_LOCK_KEY)))
+
+    @respx.mock
+    async def test_the_run_reports_it_once_by_name_on_both_channels(
+        self, session, two_users, provider, monkeypatch
+    ):
+        """The whole path, from the provider's 404 to the two alerts. "3 failed,
+        aborted=True" was what the deadman said for as long as this went on, and
+        the error tracker said nothing at all."""
+        monkeypatch.setenv("HEALTHCHECK_RECOMMENDATIONS_URL", HEALTHCHECK)
+        get_settings.cache_clear()
+        captured: list[BaseException] = []
+        monkeypatch.setattr(
+            scheduled.sentry_sdk, "capture_exception", lambda exc, **kw: captured.append(exc)
+        )
+        route = self._withdrawn()
+        down = respx.get(HEALTHCHECK, params={"status": "down"}).mock(
+            return_value=httpx.Response(200)
+        )
+
+        assert await run(_parse_args([])) == 1
+
+        assert route.call_count == 1
+        assert down.call_count == 1
+        assert down.calls.last.request.url.params["msg"].startswith("LLMModelNotFound: ")
+        assert [type(exc) for exc in captured] == [LLMModelNotFound]
+        written = (
+            await session.execute(select(func.count()).select_from(UserRecommendationSet))
+        ).scalar_one()
+        assert written == 0
 
 
 class TestTheAdvisoryLock:

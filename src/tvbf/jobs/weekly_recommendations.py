@@ -4,8 +4,9 @@
     python -m tvbf.jobs.weekly_recommendations --dry-run --user <uuid>
 
 The bare invocation is the pass (NEU-1109), a Coolify scheduled task running
-Sundays. `--dry-run` (NEU-1105) compiles one user's payload, writes it to
-stdout, and exits **without calling a provider**.
+Mondays at 12:15 UTC (`15 12 * * 1`). The spec and older comments say Sundays;
+Coolify is what runs it. `--dry-run` (NEU-1105) compiles one user's payload,
+writes it to stdout, and exits **without calling a provider**.
 
 Follows NEU-1008 like every other scheduled job here: **the process is the run
 and the exit code is the result**, `configure_logging()` in `main()`, and its own
@@ -78,6 +79,14 @@ pass working.
 consecutive-failure precedent: a provider that has failed three users running is
 not going to serve the fourth, and the calls are what cost money.
 
+**One provider answer ends the pass at once, and is nobody's failure**
+(NEU-2542): `LLMModelNotFound`, the provider saying it no longer serves
+`RECOMMENDATION_MODEL`. No `failed` set is written, because the cause is the
+deployment's. It leaves `run_pass` as an exception, a new one that carries no
+frame of the user's turn, so `run()` reports it like
+any crash outside a user's turn: one error-tracker event and one `status=down`
+whose message names it.
+
 ## Sequential per user, with a written-down threshold for changing it
 
 Cost is `users x latency` — 0.6 minutes at 5 users, ~11 at 100 and ~23 at 200
@@ -125,6 +134,7 @@ from tvbf.llm.client import OpenAICompatClient
 from tvbf.llm.registry import DEEPINFRA
 from tvbf.llm.types import (
     LLMError,
+    LLMModelNotFound,
     LLMResponse,
     LLMResponseInvalid,
     Prompt,
@@ -831,6 +841,21 @@ async def run_pass(settings: Settings, *, user_id: UUID | None = None) -> PassRe
                 # way. Raising beats writing `CONSECUTIVE_FAILURE_LIMIT` rows
                 # blaming users for a programming error.
                 raise
+            except LLMModelNotFound as exc:
+                # The same argument one layer out (NEU-2542): the provider has
+                # withdrawn the model, so the next user gets the same 404. Left
+                # to the handler below, this wrote three `failed` rows a run and
+                # a deadman message that only counted them. Raised, `run()`
+                # reports it once, by name, on both channels.
+                #
+                # **A new exception, not the one that arrived.** `run()` hands
+                # whatever leaves here to the error tracker, which records the
+                # local variables of every frame in the traceback. The original's
+                # traceback runs through this user's turn, so it carries their
+                # payload and the request body built from it: a watch history,
+                # copied into the tracker. This one starts here, and `from None`
+                # keeps the tracker from walking back to the original.
+                raise LLMModelNotFound(str(exc)) from None
             except Exception as exc:
                 # Deliberately every exception, not only `LLMError`. Per-user
                 # isolation is about the *user*, not about which layer failed:
