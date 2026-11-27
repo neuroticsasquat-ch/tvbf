@@ -23,6 +23,7 @@ from tvbf.catalog.models import Show
 from tvbf.config import get_settings
 from tvbf.jobs import weekly_recommendations
 from tvbf.jobs.weekly_recommendations import PassResult, _parse_args, run
+from tvbf.llm.types import LLMModelNotFound
 from tvbf.recommendations.payload import GENERATION_FLOOR, INTERESTED_CAP, build_payload
 
 MODEL = "deepseek-ai/DeepSeek-V4-Pro-0813"
@@ -277,6 +278,21 @@ class TestTheDeadman:
 
         assert down.call_count == 1
         assert "crashed" in caplog.text
+
+    @respx.mock
+    async def test_a_withdrawn_model_pings_down_once_and_says_so(self, configured, pass_result):
+        """NEU-2542. The message is the whole point: "3 failed, aborted=True" was
+        what Kuma said for a month of this, and it took a spike to read it."""
+        pass_result(LLMModelNotFound("the provider does not serve the model 'vendor/Gone'"))
+        down = respx.get(HEALTHCHECK, params={"status": "down"}).mock(
+            return_value=httpx.Response(200)
+        )
+
+        assert await run(_parse_args([])) == 1
+
+        assert down.call_count == 1
+        assert len(respx.calls) == 1
+        assert respx.calls.last.request.url.params["msg"].startswith("LLMModelNotFound: ")
 
     @respx.mock
     async def test_the_lock_being_held_pings_nothing(self, configured, pass_result):

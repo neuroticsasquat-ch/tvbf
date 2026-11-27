@@ -27,6 +27,7 @@ from tvbf.llm.registry import base_url_for as base_url_for
 from tvbf.llm.retry import DEFAULT_RETRY_POLICY as DEFAULT_RETRY_POLICY
 from tvbf.llm.retry import RetryPolicy as RetryPolicy
 from tvbf.llm.types import LLMError as LLMError
+from tvbf.llm.types import LLMModelNotFound as LLMModelNotFound
 from tvbf.llm.types import LLMRequestFailed as LLMRequestFailed
 from tvbf.llm.types import LLMResponse as LLMResponse
 from tvbf.llm.types import LLMResponseInvalid as LLMResponseInvalid

@@ -25,7 +25,7 @@ from typing import Any
 import httpx
 from pydantic import ValidationError
 
-from tvbf.llm.api_payloads import ChatCompletion, ChatUsage
+from tvbf.llm.api_payloads import ChatCompletion, ChatUsage, ErrorEnvelope
 from tvbf.llm.registry import DEEPINFRA, base_url_for
 from tvbf.llm.retry import (
     DEFAULT_RETRY_POLICY,
@@ -35,6 +35,7 @@ from tvbf.llm.retry import (
     retry_for_status,
 )
 from tvbf.llm.types import (
+    LLMModelNotFound,
     LLMRequestFailed,
     LLMResponse,
     LLMResponseInvalid,
@@ -145,6 +146,30 @@ def _classify(exc: BaseException) -> Retry | None:
             verdict.retry_after,
         )
     return verdict
+
+
+MODEL_NOT_FOUND = "model_not_found"
+"""The `error.code` DeepInfra sends with a 404 for a model it does not serve.
+
+Read off production's own log on 2026-11-27 (NEU-2542), not from documentation.
+"""
+
+
+def _model_is_not_served(response: httpx.Response) -> bool:
+    """Whether a failed response says the model itself is gone.
+
+    The status **and** the provider's code together, never the status alone: a
+    bare 404 is also what a wrong base URL answers, and that is a different fix
+    from a withdrawn model. A body that is not the error envelope carries no
+    code, so it is an ordinary request failure.
+    """
+    if response.status_code != httpx.codes.NOT_FOUND:
+        return False
+    try:
+        envelope = ErrorEnvelope.model_validate_json(response.content)
+    except ValidationError:
+        return False
+    return envelope.error is not None and envelope.error.code == MODEL_NOT_FOUND
 
 
 def _message_content(completion: ChatCompletion) -> str:
@@ -289,7 +314,8 @@ class OpenAICompatClient:
         Raises `LLMRequestFailed` when no usable response arrived — the client has
         already retried whatever was worth retrying, so the caller must not — and
         `LLMResponseInvalid` when one arrived and could not be believed, which the
-        caller retries exactly once (`types`).
+        caller retries exactly once (`types`). `LLMModelNotFound` is the request
+        failure that says the provider no longer serves this model at all.
 
         An `UnsupportedPromptError` from the prompt itself is neither: nothing was
         sent, so it is a programming error rather than a call outcome.
@@ -300,6 +326,10 @@ class OpenAICompatClient:
                 lambda: self._post(body), policy=self._policy, classify=_classify
             )
         except httpx.HTTPStatusError as exc:
+            if _model_is_not_served(exc.response):
+                raise LLMModelNotFound(
+                    f"the provider does not serve the model {self._model!r}"
+                ) from exc
             raise LLMRequestFailed(
                 f"{exc.response.status_code} from the model provider: "
                 # Bodies here are provider error envelopes, not model output, and

@@ -47,11 +47,17 @@ class Prompt:
     `max_tokens` needs headroom beyond the visible answer: DeepSeek is a
     reasoning model and its reasoning tokens count against this ceiling while
     being absent from the text that comes back.
+
+    **8192 by measurement** (NEU-2542). At 4096 a model writing about 3,800
+    output tokens an answer reached the ceiling exactly twice in 34 calls. A
+    reply cut off there does not decode, so the job would spend its one retry on
+    a truncation and record the user `failed` if the second answer ran as long.
+    The ceiling costs nothing until an answer needs it.
     """
 
     system: str
     user: str
-    max_tokens: int = 4096
+    max_tokens: int = 8192
 
 
 @dataclass(frozen=True)
@@ -84,7 +90,8 @@ class LLMResponse:
 
 class LLMError(Exception):
     """Base for every way a call can fail. One base, deliberately: the job
-    dispatches on the two subclasses below and nothing else."""
+    dispatches on the two subclasses below, and on `LLMModelNotFound` — the one
+    request failure that is the deployment's rather than a user's."""
 
 
 class LLMRequestFailed(LLMError):
@@ -95,6 +102,23 @@ class LLMRequestFailed(LLMError):
     worth retrying (`retry.py`), so a failure that reaches the caller has
     survived the backoff curve; asking again immediately buys the same failure
     and spends a user's turn in the weekly pass on it.
+    """
+
+
+class LLMModelNotFound(LLMRequestFailed):
+    """The provider answered that it does not serve the configured model.
+
+    **A failure of the deployment, not of the user whose turn found it**
+    (NEU-2542). A provider withdraws models, and when it withdrew the one
+    production ran, every call answered 404 `model_not_found`. Read as an
+    ordinary request failure, that became three `failed` sets against the three
+    oldest accounts on every run, and a deadman message saying only that three
+    users had failed.
+
+    A subclass of `LLMRequestFailed` so that every handler written against it
+    still catches this. The weekly pass is the one caller that asks for it by
+    name: it stops the pass at the first one, because the next user would get
+    the same answer.
     """
 
 
