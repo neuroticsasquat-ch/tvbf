@@ -25,6 +25,7 @@ from opentelemetry.trace import Status, StatusCode
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sentry_sdk.integrations.logging import LoggingIntegration
 from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
+from sentry_sdk.scrubber import DEFAULT_DENYLIST, EventScrubber
 
 log = logging.getLogger(__name__)
 
@@ -86,6 +87,29 @@ def init_sentry(env: Mapping[str, str] = os.environ, *, job: str | None = None) 
     turn one bad upstream day into dozens of `#alerts` posts; a job reports
     only its own failure, explicitly (`tvbf.jobs.scheduled.report_down`).
     Records still ride along on that event as breadcrumbs.
+
+    **Three of the SDK's defaults are turned off, because each sent something
+    that should not leave the process** (NEU-2544), measured with made-up
+    secrets:
+
+    - *Local variables of every frame.* A crashed job sent the whole `Settings`
+      object, every token and the database password in it; a failed login sent
+      the handler's `payload`, plaintext password included; a failure inside a
+      user's turn of the weekly pass sent their watch history.
+    - *The request body.* The scrubber hides a key named exactly `password`, so
+      a failed password change sent `current_password` and `new_password` in
+      the clear.
+    - *The `X-CSRF-Token` header*, which the scrubber knows under other names.
+
+    Off for the API and the jobs alike, and off rather than filtered: a list of
+    names to scrub has to keep step with every new local variable and request
+    field, and it fails open. The cost is a stack trace without values.
+    `tests/unit/test_error_event_contents.py` reads real events to hold it.
+
+    **This does not make an event safe by construction.** What an exception's
+    own message says still goes (`db.py` hides a statement's parameters for that
+    reason), and so do breadcrumbs, which record the URL of every outbound
+    request, and the request's query string. NEU-2544 lists what was found.
     """
     telemetry = resolve_telemetry(env)
     dsn = env.get("SENTRY_DSN")
@@ -114,6 +138,14 @@ def init_sentry(env: Mapping[str, str] = os.environ, *, job: str | None = None) 
                 SqlalchemyIntegration(),
             ],
             traces_sample_rate=0.1,  # 10% of requests get perf traces
+            include_local_variables=False,
+            max_request_body_size="never",
+            # The SDK hides the values of the keys it knows (`password`,
+            # `cookie`, `csrf_token`, …) in an event's request, extra, user and
+            # breadcrumb sections. This API's CSRF header is not one of them.
+            # Built here rather than held as a constant: the scrubber appends to
+            # the list it is handed.
+            event_scrubber=EventScrubber(denylist=[*DEFAULT_DENYLIST, "x-csrf-token"]),
             environment=telemetry.environment,
             release=telemetry.release,
         )
