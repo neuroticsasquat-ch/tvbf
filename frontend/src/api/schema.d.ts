@@ -158,10 +158,11 @@ export interface paths {
      *     than a double spend. Refusing here as well would mean a second liveness
      *     notion for one job, which is what the missing run table exists to avoid.
      *
-     *     The two refusals are both about the only feedback this endpoint can give.
-     *     A misconfigured provider or an unknown user id would otherwise be a 202
-     *     followed by silence in a log nobody is watching, so both are answered
-     *     synchronously, before the task is spawned.
+     *     The refusals are all about the only feedback this endpoint can give. A
+     *     misconfigured provider, a `RECOMMENDATION_CONCURRENCY` over its cap
+     *     (NEU-2546) or an unknown user id would otherwise be a 202 followed by
+     *     silence in a log nobody is watching, so each is answered synchronously,
+     *     before the task is spawned.
      */
     post: operations["trigger_weekly_recommendations_admin_recommendations_post"];
     delete?: never;
