@@ -115,6 +115,25 @@ async def test_raises_on_non_2xx(http: httpx.AsyncClient) -> None:
 
 
 @respx.mock
+async def test_a_non_2xx_message_carries_the_status_and_not_the_body(
+    http: httpx.AsyncClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The message reaches the error tracker; the body stays in a DEBUG log line
+    (NEU-2545)."""
+    respx.post("https://api.linear.app/graphql").mock(
+        return_value=httpx.Response(400, text="upstream-body-canary"),
+    )
+    client = LinearClient(api_key="sk_test", http=http)
+    with caplog.at_level("DEBUG", logger="tvbf.integrations.linear"):
+        with pytest.raises(LinearError) as failed:
+            await client.issue_create(team_id="t", title="s", description="b")
+    assert "400" in str(failed.value)
+    assert "upstream-body-canary" not in str(failed.value)
+    [record] = [r for r in caplog.records if "upstream-body-canary" in r.getMessage()]
+    assert record.levelname == "DEBUG"
+
+
+@respx.mock
 async def test_raises_on_success_false(http: httpx.AsyncClient) -> None:
     respx.post("https://api.linear.app/graphql").mock(
         return_value=httpx.Response(

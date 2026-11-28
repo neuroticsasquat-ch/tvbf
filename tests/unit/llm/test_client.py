@@ -298,16 +298,22 @@ class TestRequestFailure:
         assert route.call_count == 0
 
     @respx.mock
-    async def test_a_400_carries_the_providers_own_error_body(self):
+    async def test_a_400_logs_the_providers_body_and_does_not_quote_it(self, caplog):
         """The body is the only place a rejected `response_format` or a wrong
-        model id says so, and NEU-1100 is the ticket that reads it."""
+        model id says so (NEU-1100), so it is logged. Not quoted in the message,
+        which reaches the error tracker, and logged at DEBUG, because a line at
+        INFO or above reaches it too as a breadcrumb (NEU-2545)."""
         respx.post(COMPLETIONS).mock(
-            return_value=httpx.Response(400, json={"error": {"message": "no such model"}})
+            return_value=httpx.Response(400, json={"error": {"message": "upstream-body-canary"}})
         )
 
         async with _client() as client:
-            with pytest.raises(LLMRequestFailed, match="400 from the model provider.*no such"):
-                await client.complete_json(PROMPT)
+            with caplog.at_level("DEBUG", logger="tvbf.llm.client"):
+                with pytest.raises(LLMRequestFailed, match="400 from the model provider") as failed:
+                    await client.complete_json(PROMPT)
+        assert "upstream-body-canary" not in str(failed.value)
+        carrying = [r for r in caplog.records if "upstream-body-canary" in r.getMessage()]
+        assert [r.levelname for r in carrying] == ["DEBUG"]
 
 
 def _not_found(code: str | None = "model_not_found") -> httpx.Response:

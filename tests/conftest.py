@@ -16,7 +16,7 @@ os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 # test run regardless of what the dev container exports.
 os.environ.pop("COOKIE_DOMAIN", None)
 
-pytest_plugins = ["tests.fixtures.users"]
+pytest_plugins = ["tests.fixtures.users", "tests.fixtures.sentry"]
 
 from collections.abc import AsyncIterator  # noqa: E402
 

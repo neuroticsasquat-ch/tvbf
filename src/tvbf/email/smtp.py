@@ -53,8 +53,13 @@ class SmtpEmailClient(EmailClient):
         try:
             await asyncio.to_thread(self._send_blocking, msg)
         except (OSError, smtplib.SMTPException) as e:
+            # The server's text names the recipient, so the message keeps its
+            # class and code and the text stays in the log (NEU-2545). Not
+            # chained either: the error tracker sends a cause's message too.
             log.warning("smtp.send_error", exc_info=True)
-            raise EmailSendError(f"smtp send failed: {e}") from e
+            code = e.smtp_code if isinstance(e, smtplib.SMTPResponseException) else None
+            detail = f"{type(e).__name__} {code}" if code is not None else type(e).__name__
+            raise EmailSendError(f"smtp send failed: {detail}") from None
 
     def _send_blocking(self, msg: EmailMessage) -> None:
         with smtplib.SMTP(self._host, self._port, timeout=self._timeout) as s:

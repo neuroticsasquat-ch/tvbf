@@ -61,5 +61,8 @@ class ResendEmailClient(EmailClient):
             raise EmailSendError(f"resend transport error: {e}") from e
 
         if resp.status_code >= 400:
-            log.warning("resend.http_error status=%s body=%s", resp.status_code, resp.text[:500])
-            raise EmailSendError(f"resend returned HTTP {resp.status_code}: {resp.text[:200]}")
+            # The body only at DEBUG: an exception's message reaches the error
+            # tracker, and so does a log line at INFO or above (NEU-2545).
+            log.warning("resend.http_error status=%s", resp.status_code)
+            log.debug("resend.http_error body=%s", resp.text[:500])
+            raise EmailSendError(f"resend returned HTTP {resp.status_code}")

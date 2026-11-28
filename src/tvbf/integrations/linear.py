@@ -7,9 +7,12 @@ keys don't use a Bearer prefix.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import httpx
+
+log = logging.getLogger(__name__)
 
 _LINEAR_URL = "https://api.linear.app/graphql"
 
@@ -124,9 +127,10 @@ class LinearClient:
             raise LinearError(f"transport error: {exc}") from exc
 
         if res.status_code // 100 != 2:
-            raise LinearError(
-                f"linear {mutation_name} returned http {res.status_code}: {res.text[:200]}"
-            )
+            # The body only in the log, at DEBUG: an exception's message reaches
+            # the error tracker, and so does a log line at INFO or above (NEU-2545).
+            log.debug("linear %s http %s body=%s", mutation_name, res.status_code, res.text[:500])
+            raise LinearError(f"linear {mutation_name} returned http {res.status_code}")
 
         body = res.json()
         if errors := body.get("errors"):
