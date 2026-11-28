@@ -48,7 +48,10 @@ def sentry_events():
         yield events
     finally:
         sentry_sdk.get_client().close()
-        sentry_sdk.init()
+        # Not a bare `init()`: that installs the SDK's default integrations for the
+        # rest of the process, and an installed integration cannot be disabled
+        # again, so a later `init_sentry` would still attach `sys.argv`.
+        sentry_sdk.get_global_scope().set_client(None)
 
 
 async def test_rejects_unauth(admin_client):
