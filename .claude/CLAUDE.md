@@ -421,6 +421,9 @@ orchestration/         # Prefect's own uv project, synced into /opt/prefect-venv
   flows/
     command.py         # `run_command`: runs `opentelemetry-instrument python -m tvbf.jobs.<module>` in its own session and maps its exit to the run's state; pings the deadman down only for a timeout, a signal or the flow being stopped (NEU-2552, spec §4.3)
     late.py            # the missed-run rule: a scheduler-created run more than its tolerance late is `Cancelled(name="Missed")` and runs nothing (NEU-2552, spec §4.4)
+    deployments.py     # the deployments table, standard library only: one row per job — module, UTC cron, timeout, deadman variable, runs-after, active (NEU-2553, spec §4.5); every row inactive until its cutover ticket, and Coolify runs the jobs until then. Each cutover makes it the one place its job's schedule is written
+    jobs.py            # one flow per row, `retries=0`, no parameters: the missed-run rule, then `run_command` with the row's argument list (NEU-2553)
+    register.py        # `python -m flows.register --pool tvbf-jobs`: upserts the table onto ops' shared server, prunes what it no longer names, refuses a name another pool holds; `TVBF_SCHEDULES_ACTIVE=false` forces every schedule off (NEU-2553, spec §4.7)
   tests/               # run by `task test:flows` on Prefect's interpreter
 ```
 
