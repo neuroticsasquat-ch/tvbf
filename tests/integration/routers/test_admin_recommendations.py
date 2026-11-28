@@ -212,3 +212,21 @@ async def test_an_unconfigured_provider_is_refused(session, spawned, monkeypatch
 
     assert ei.value.status_code == 503
     assert not spawned
+
+
+async def test_a_concurrency_over_its_cap_is_refused(session, provider, spawned, monkeypatch):
+    """NEU-2546. `run_pass` would refuse it too, but in a background task, where
+    the refusal is a log line after a 202."""
+    monkeypatch.setenv("RECOMMENDATION_CONCURRENCY", "11")
+    get_settings.cache_clear()
+    try:
+        with pytest.raises(HTTPException) as ei:
+            await admin_router.trigger_weekly_recommendations(
+                body=None, settings=get_settings(), session=session
+            )
+    finally:
+        get_settings.cache_clear()
+
+    assert ei.value.status_code == 503
+    assert "cap of 10" in str(ei.value.detail)
+    assert not spawned
