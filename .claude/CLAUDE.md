@@ -418,7 +418,9 @@ tests/
 
 orchestration/         # Prefect's own uv project, synced into /opt/prefect-venv (NEU-2551, ADR-0016); never imports tvbf
   pyproject.toml       # prefect pinned to ops' server tag; package = false; its own pytest and pyright config
-  flows/               # the flows (empty until NEU-2552)
+  flows/
+    command.py         # `run_command`: runs `opentelemetry-instrument python -m tvbf.jobs.<module>` in its own session and maps its exit to the run's state; pings the deadman down only for a timeout, a signal or the flow being stopped (NEU-2552, spec §4.3)
+    late.py            # the missed-run rule: a scheduler-created run more than its tolerance late is `Cancelled(name="Missed")` and runs nothing (NEU-2552, spec §4.4)
   tests/               # run by `task test:flows` on Prefect's interpreter
 ```
 
