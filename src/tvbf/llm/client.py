@@ -330,14 +330,17 @@ class OpenAICompatClient:
                 raise LLMModelNotFound(
                     f"the provider does not serve the model {self._model!r}"
                 ) from exc
-            raise LLMRequestFailed(
-                f"{exc.response.status_code} from the model provider: "
-                # Bodies here are provider error envelopes, not model output, and
-                # are the only place a wrong model id or a rejected
-                # `response_format` says so. Truncated because nothing downstream
-                # reads it and a long one buries the status in the log.
-                f"{exc.response.text[:500]}"
-            ) from exc
+            # Bodies here are provider error envelopes, not model output, and are
+            # the only place a wrong model id or a rejected `response_format`
+            # says so. Logged rather than quoted, and at DEBUG: an exception's
+            # message reaches the error tracker, and so does a log line at INFO
+            # or above (NEU-2545).
+            log.debug(
+                "model provider http %s body=%s",
+                exc.response.status_code,
+                exc.response.text[:500],
+            )
+            raise LLMRequestFailed(f"{exc.response.status_code} from the model provider") from exc
         except httpx.HTTPError as exc:
             raise LLMRequestFailed(f"the request to the model provider failed: {exc}") from exc
 

@@ -172,6 +172,26 @@ async def test_resend_send_raises_on_http_error() -> None:
 
 @respx.mock
 @pytest.mark.asyncio
+async def test_resend_http_error_message_carries_the_status_and_not_the_body(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The message reaches the error tracker, and so does a log line at INFO or
+    above, as a breadcrumb; the body stays at DEBUG (NEU-2545)."""
+    respx.post("https://api.resend.com/emails").mock(
+        return_value=httpx.Response(422, text="recipient-canary@example.com is invalid")
+    )
+    client = ResendEmailClient(api_key="re_test", from_address="from@x")
+    with caplog.at_level("DEBUG", logger="tvbf.email.resend"):
+        with pytest.raises(EmailSendError) as failed:
+            await client.send(to="recipient-canary@example.com", subject="s", html="h", text="t")
+    assert "422" in str(failed.value)
+    assert "recipient-canary" not in str(failed.value)
+    carrying = [r for r in caplog.records if "recipient-canary" in r.getMessage()]
+    assert [r.levelname for r in carrying] == ["DEBUG"]
+
+
+@respx.mock
+@pytest.mark.asyncio
 async def test_resend_send_raises_on_transport_error() -> None:
     respx.post("https://api.resend.com/emails").mock(side_effect=httpx.ConnectError("nope"))
     client = ResendEmailClient(api_key="re_test", from_address="from@x")
@@ -260,6 +280,43 @@ async def test_smtp_send_wraps_smtp_exception() -> None:
 
     with pytest.raises(EmailSendError, match="smtp send failed"):
         await client.send(to="x", subject="s", html="h", text="t")
+
+
+@pytest.mark.asyncio
+async def test_smtp_send_error_message_carries_the_code_and_not_the_recipient() -> None:
+    """A refused recipient's error names the address; the message reaches the
+    error tracker (NEU-2545)."""
+    client = SmtpEmailClient(host="mailpit", port=1025, from_address="from@x")
+
+    def _refused(_msg: EmailMessage) -> None:
+        raise smtplib.SMTPRecipientsRefused(
+            {"recipient-canary@example.com": (550, b"recipient-canary@example.com: no such user")}
+        )
+
+    def _rejected(_msg: EmailMessage) -> None:
+        raise smtplib.SMTPDataError(554, b"rejected for recipient-canary@example.com")
+
+    def _chain(exc: BaseException) -> list[BaseException]:
+        """What the error tracker sends: the exception and what it chains to."""
+        chain: list[BaseException] = []
+        current: BaseException | None = exc
+        while current is not None:
+            chain.append(current)
+            current = current.__cause__ or (
+                None if current.__suppress_context__ else current.__context__
+            )
+        return chain
+
+    client._send_blocking = _refused  # type: ignore[method-assign]
+    with pytest.raises(EmailSendError) as refused:
+        await client.send(to="recipient-canary@example.com", subject="s", html="h", text="t")
+    assert [str(e) for e in _chain(refused.value) if "recipient-canary" in str(e)] == []
+
+    client._send_blocking = _rejected  # type: ignore[method-assign]
+    with pytest.raises(EmailSendError) as rejected:
+        await client.send(to="recipient-canary@example.com", subject="s", html="h", text="t")
+    assert "554" in str(rejected.value)
+    assert [str(e) for e in _chain(rejected.value) if "recipient-canary" in str(e)] == []
 
 
 @pytest.mark.asyncio
