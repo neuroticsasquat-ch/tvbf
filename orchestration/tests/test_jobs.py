@@ -20,6 +20,12 @@ class FakeRunner:
         return State(type=StateType.COMPLETED)
 
 
+@pytest.fixture(autouse=True)
+def no_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The wait is tested in test_wait.py; here it would read the shared server's runs."""
+    monkeypatch.setattr(jobs, "wait_for_upstream", lambda row: None)
+
+
 @pytest.fixture
 def runner(monkeypatch: pytest.MonkeyPatch) -> FakeRunner:
     fake = FakeRunner()

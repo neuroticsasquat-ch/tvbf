@@ -1,8 +1,9 @@
 """One flow per scheduled job (project spec §4.3 to §4.5).
 
 Ported from ss.fm's `orchestration/flows/chains.py` (NEU-2531). Each flow applies the
-missed-run rule, builds its argument list from its row of the deployments table, and
-returns the state its command's exit maps to. No flow has retries and none takes a
+missed-run rule, waits while a flow it runs after is in flight (§4.6), builds its
+argument list from its row of the deployments table, and returns the state its
+command's exit maps to. No flow has retries and none takes a
 parameter (spec §4.3, §4.9).
 """
 
@@ -17,6 +18,7 @@ from flows import command
 from flows.command import run_command, run_logger
 from flows.deployments import BY_FLOW, Deployment
 from flows.late import missed_run_state
+from flows.wait import wait_for_upstream
 
 
 def _current_flow_run() -> FlowRun | None:
@@ -38,8 +40,9 @@ def run_job(
 ) -> State:
     """The body every job's flow shares.
 
-    `flow_run` defaults to the current run and `runner` to `run_command`, looked up
-    when called so a test can replace it.
+    `flow_run` defaults to the current run and `runner` to `run_command`. The wait and
+    the command are looked up when called, so a test can replace either. A missed run
+    does not wait; the row's timeout covers the command, not the wait.
     """
     if flow_run is None:
         flow_run = _current_flow_run()
@@ -47,6 +50,7 @@ def run_job(
     if missed is not None:
         run_logger().warning("%s: missed run, %s", row.name, missed.message)
         return missed
+    wait_for_upstream(row)
     return (runner or run_command)(
         argv_for(row),
         job=row.job,
