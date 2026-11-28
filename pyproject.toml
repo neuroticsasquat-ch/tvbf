@@ -54,11 +54,15 @@ build-backend = "hatchling.build"
 packages = ["src/tvbf"]
 
 # What `ruff check` and `ruff format` cover when run bare, as CI's shared python.yml and the
-# Taskfile's lint/format targets run them: src and tests, as before NEU-2235 put the paths here.
+# Taskfile's lint/format targets run them: src and tests, as before NEU-2235 put the paths here,
+# and orchestration/ (NEU-2551).
 [tool.ruff]
 line-length = 100
 target-version = "py313"
-include = ["src/**/*.py", "tests/**/*.py"]
+include = ["src/**/*.py", "tests/**/*.py", "orchestration/**/*.py"]
+# orchestration/ is its own uv project (ADR-0016) but is linted from this config;
+# naming it here makes `flows` first-party to isort.
+src = [".", "src", "orchestration"]
 
 [tool.ruff.format]
 # ruff 0.16.0 began formatting Python code blocks inside Markdown by default.
@@ -69,7 +73,9 @@ exclude = ["*.md"]
 select = ["E", "F", "W", "I", "B", "UP"]
 ignore = ["B008"]  # FastAPI's Depends() pattern intentionally uses function calls in defaults
 
-# The same scope for pyright, run bare by CI and `task typecheck`.
+# The same scope for pyright, run bare by CI and `task typecheck`. orchestration/ runs
+# on Prefect's interpreter, not this one: `task typecheck` checks it in a second pass
+# with its own config (orchestration/pyproject.toml).
 [tool.pyright]
 include = ["src", "tests"]
 

@@ -1,12 +1,16 @@
-__pycache__
-*.pyc
-.pytest_cache
-.ruff_cache
+# `**/`: .dockerignore patterns are anchored to the context root, and orchestration/
+# (ADR-0016) is a second uv project with caches and possibly a .venv of its own.
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
 .git
 .gitignore
-.venv
+**/.venv
 node_modules
 docs/
+# The image runs flows, never their tests; the dev container bind-mounts the repo.
+orchestration/tests/
 
 # The frontend has its own image (frontend/Dockerfile); keep it out of the backend's.
 frontend

@@ -1,0 +1,38 @@
+# Prefect's own uv project (ADR-0016; project spec §4.2). Prefect pins fastapi below
+# the version the app runs, so it cannot share the app's environment: the image syncs
+# this project into /opt/prefect-venv, beside the app's system Python. A flow never
+# imports `tvbf`, and the app never imports Prefect (spec §4.1).
+[project]
+name = "tvbf-orchestration"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    # Exact, and the tag in ops prefect/Dockerfile: a worker never runs a newer Prefect
+    # than the shared server. Dependabot ignores it (.github/dependabot.yml); an upgrade
+    # follows ops' Upgrade procedure, server first, then this pin.
+    "prefect==3.9.5",
+]
+
+# Not a package: the flows run from this directory, so `uv sync` installs the locked
+# dependencies only.
+[tool.uv]
+package = false
+
+# pytest only. ruff and pyright come from the app's dev group (`task lint`,
+# `task typecheck`), so both environments are checked by one version of each.
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+# Read when pytest is given orchestration/tests (`task test:flows`); the root config's
+# testpaths keep `task test` out of this directory.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+# The second pass of `task typecheck`, run as `pyright -p orchestration` on Prefect's
+# interpreter. The root pass covers src and tests only.
+[tool.pyright]
+pythonVersion = "3.13"
+exclude = ["**/__pycache__", "**/.*"]

@@ -8,8 +8,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_PROJECT_ENVIRONMENT=/usr/local \
     UV_PYTHON_DOWNLOADS=never
 
+# tini: for the Prefect worker to run under as PID 1 (its start script comes with
+# project spec §4.8), so a flow run's child processes are reaped and a stop signal
+# reaches the worker (ADR-0016).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libatomic1 \
+    && apt-get install -y --no-install-recommends libatomic1 tini \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir uv
@@ -23,6 +26,14 @@ WORKDIR /app
 # keeps what the lockfile doesn't list -- pip and uv itself -- in /usr/local.
 COPY pyproject.toml uv.lock ./
 
+# Prefect's own environment (ADR-0016; project spec §4.2): Prefect pins a FastAPI older
+# than the app's, so it cannot share the system Python. `uv` builds a virtualenv at
+# /opt/prefect-venv on the image's own Python 3.13, which is not on PATH: `python` stays
+# the app's, and Prefect is always called by its full path, /opt/prefect-venv/bin/prefect.
+# Its dev group (pytest) is the dev stage's.
+COPY orchestration/pyproject.toml orchestration/uv.lock orchestration/
+RUN UV_PROJECT_ENVIRONMENT=/opt/prefect-venv \
+    uv sync --locked --no-cache --no-dev --project orchestration
 
 # The dev dependency group is installed by default; prod leaves it out with --no-dev.
 FROM base AS dev
@@ -33,7 +44,11 @@ COPY src/ src/
 COPY alembic.ini alembic.ini
 COPY migrations/ migrations/
 
-RUN uv sync --locked --inexact --no-cache
+RUN uv sync --locked --inexact --no-cache \
+    && UV_PROJECT_ENVIRONMENT=/opt/prefect-venv \
+       uv sync --locked --no-cache --project orchestration
+
+COPY orchestration/ orchestration/
 
 EXPOSE 8000
 
@@ -49,6 +64,8 @@ COPY alembic.ini alembic.ini
 COPY migrations/ migrations/
 
 RUN uv sync --locked --inexact --no-cache --no-dev --no-editable
+
+COPY orchestration/ orchestration/
 
 # Not root (ops: Shared CI workflows, Decision 13; CI's image job checks it). Nothing in
 # the image is written at runtime: no volume, no bytecode (PYTHONDONTWRITEBYTECODE), and
