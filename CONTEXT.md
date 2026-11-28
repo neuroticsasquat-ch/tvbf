@@ -283,6 +283,44 @@ _Avoid_: unfollow, snooze, silence
 A tracked show whose status leaves ended or cancelled — a renewal, an un-cancellation, a network pickup. A catalog event of its own, and **not** a resurrection: resurrection is a tombstoned row reappearing upstream, which says nothing about whether the show is making more episodes.
 _Avoid_: resurrected, renewed (TMDB's vocabulary has no such status; the event is the transition), un-cancelled
 
+### Scheduled jobs
+
+**Scheduled job**:
+One of the six commands that run on a clock: the catalog delta, the airdate reconcile, the trending snapshot, the two delivery tasks and the weekly recommendations pass. Each is `python -m tvbf.jobs.<module>`, and its exit code is its result. Until its cutover a Coolify scheduled task starts it; after, a Prefect deployment does (ADR-0016).
+_Avoid_: cron, task (a *delivery task* is a kind of job; a Coolify task is what used to start one), pipeline
+
+**Deadman**:
+A job's Uptime Kuma push monitor. The job pings it up on success and down on failure, and it fires on silence, which is the one case nothing else can see: the job never ran. One per job, never shared. Prefect does not replace it.
+_Avoid_: healthcheck (that is the variable's name, not the thing), heartbeat (Prefect's word for a flow run's own beat)
+
+**Worker**:
+The `tvbf-worker` resource: a Prefect process worker on work pool `tvbf-jobs`, built from the API's image. It starts every scheduled job. It serves no HTTP and runs no migrations.
+_Avoid_: jobs container, scheduler (the scheduler is the shared server)
+
+**Deployments table**:
+`orchestration/flows/deployments.py`: one row per scheduled job, holding its command, cron, timeout, deadman variable and the flows it runs after. The one place in the repository a schedule is written.
+_Avoid_: schedule config, crontab
+
+**Wait**:
+What a flow does before its command when its row names flows it runs after: it holds while a run of any of them is pending, running or late, for at most 45 minutes, and then runs whatever happened upstream. It sees only runs Prefect started.
+_Avoid_: dependency, chain (nothing starts anything else), lock
+
+**Missed run**:
+A run the scheduler created that starts more than 30 minutes after its scheduled time. It does nothing and pings nothing, so the job's deadman fires. A run started by hand is never missed.
+_Avoid_: late run (a late run is one still waiting to be picked up), skipped run
+
+**Deploy gate**:
+The worker resource's pre-deployment command. It refuses a deploy while a job is in flight: a live run row of any kind, or the weekly pass's advisory lock held.
+_Avoid_: deploy lock, deploy check
+
+**Schema check**:
+What a job does before any work: it compares the database's migration revision with the one its image carries, and refuses to run when they differ.
+_Avoid_: migration check, version check (the *version guard* is the worker refusing a Prefect server older than itself)
+
+**Cutover**:
+Moving a job from Coolify to Prefect: its Coolify task is disabled, its row goes active, and after one green run Prefect started the Coolify task is deleted.
+_Avoid_: migration (a migration is a schema change here)
+
 ### Brand
 
 **Mark**:
