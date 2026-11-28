@@ -119,15 +119,21 @@ class Settings(BaseSettings):
     # This ceiling is **ours, not the provider's** (NEU-1099). DeepInfra's own
     # published limit was not measured, and one asserted from memory would be a
     # number that reads as a provider fact while being a guess. 5 per second is
-    # deliberately conservative: the pass is sequential and makes one call per
-    # changed user per week, so nothing today comes within three orders of
-    # magnitude of it, and it exists to bound the bounded-semaphore change the
-    # spec schedules for ~100–200 users (§10) rather than to pace anything now.
+    # deliberately conservative: the pass makes one call per changed user per
+    # week, at most `RECOMMENDATION_CONCURRENCY` at once (NEU-2546), and a call
+    # takes tens of seconds, so it binds nothing at that bound — it is what keeps
+    # a larger one from becoming a burst rather than pacing anything now.
     # Raising it is a measurement, not an edit.
     deepinfra_rate_limit_requests: int = Field(default=5, alias="DEEPINFRA_RATE_LIMIT_REQUESTS")
     deepinfra_rate_limit_window_seconds: int = Field(
         default=1, alias="DEEPINFRA_RATE_LIMIT_WINDOW_SECONDS"
     )
+    # How many users' turns the weekly pass runs at once (NEU-2546). Capped at
+    # `jobs.weekly_recommendations.MAX_CONCURRENCY`, and the cap is enforced by
+    # the job rather than here: a value over it refuses to start the *pass*, and
+    # validating it on `Settings` would refuse to start the API as well, which
+    # has no use for it.
+    recommendation_concurrency: int = Field(default=5, alias="RECOMMENDATION_CONCURRENCY")
 
     # Re-close registration without a deploy (NEU-1165 §2.4). Default false so
     # open registration is the steady state. Set true in the Coolify UI for an

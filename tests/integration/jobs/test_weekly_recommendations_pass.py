@@ -15,15 +15,17 @@ a pass test that passes only against a full mirror is one that fails for the
 next person.
 """
 
+import asyncio
 import json
 import traceback
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 import httpx
 import pytest
 import respx
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
+from tests.fixtures.handles import new_handle
 from tvbf.app.models import (
     MATCHED_VIA_AKA,
     MATCHED_VIA_NAME,
@@ -31,6 +33,7 @@ from tvbf.app.models import (
     SET_STATUS_INSUFFICIENT_HISTORY,
     SET_STATUS_NO_MATCHES,
     SET_STATUS_SUCCEEDED,
+    User,
     UserRecommendation,
     UserRecommendationDismissal,
     UserRecommendationSet,
@@ -43,6 +46,7 @@ from tvbf.jobs import scheduled
 from tvbf.jobs.weekly_recommendations import (
     ADVISORY_LOCK_KEY,
     CONSECUTIVE_FAILURE_LIMIT,
+    MAX_CONCURRENCY,
     _parse_args,
     run,
     run_pass_if_free,
@@ -73,6 +77,21 @@ def provider(monkeypatch):
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
+
+
+@pytest.fixture
+def concurrency(monkeypatch, provider):
+    """Set `RECOMMENDATION_CONCURRENCY` for one test.
+
+    On top of `provider`, whose teardown clears the cached `Settings` this
+    leaves behind.
+    """
+
+    def _set(bound: int) -> None:
+        monkeypatch.setenv("RECOMMENDATION_CONCURRENCY", str(bound))
+        get_settings.cache_clear()
+
+    return _set
 
 
 @pytest.fixture
@@ -113,6 +132,66 @@ async def user(session, make_user, catalog):
     session.add_all([UserShowWatch(user_id=account.id, show_id=TRACKED + n) for n in range(10)])
     await session.commit()
     return account
+
+
+MARKER = TRACKED + 50
+"""A show only the users a test wants to fail track, so a request names them.
+
+With turns overlapping, the order requests reach `respx` is not the order users
+start in, so a side-effect list can no longer say which user gets which answer.
+The payload is in the request body, and this title is what tells them apart.
+"""
+
+PASSWORD_HASH = "$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHQ$not-a-real-hash"
+"""Never verified by anything here: the pass reads no password."""
+
+
+async def _accounts(session, count: int, *, marked: frozenset[int] = frozenset()) -> list[User]:
+    """`count` users over the floor, oldest first, in one commit.
+
+    Rows rather than `make_user`, which hashes a real password per account —
+    the cost of a test that wants ten users and reads none of them. `created_at`
+    is set a second apart so `list_ids`' oldest-first order is the index order
+    here. The users at the `marked` indexes also track `MARKER`.
+    """
+    if marked:
+        session.add(Show(id=MARKER, name="Marker Show", status="Ended"))
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    accounts = [
+        User(
+            email=f"pass-user-{n}@example.com",
+            password_hash=PASSWORD_HASH,
+            display_name=f"Pass User {n}",
+            handle=new_handle(),
+            created_at=start + timedelta(seconds=n),
+        )
+        for n in range(count)
+    ]
+    session.add_all(accounts)
+    await session.flush()
+    for n, account in enumerate(accounts):
+        shows = [TRACKED + s for s in range(10)] + ([MARKER] if n in marked else [])
+        session.add_all([UserShowWatch(user_id=account.id, show_id=sid) for sid in shows])
+    await session.commit()
+    return accounts
+
+
+def _marked_fail(request: httpx.Request) -> httpx.Response:
+    """A 400 for a request naming `MARKER`, an answer for any other.
+
+    A 400 rather than a 5xx: `retry.retry_for_status` walks its curve on a 5xx,
+    so a transient status would spend an unpredictable number of calls.
+    """
+    if b"Marker Show" in request.content:
+        return httpx.Response(400, json={"error": "no such model"})
+    return _answer(_recommendation("Dark", 2017))
+
+
+async def _count_sets(session, status: str | None = None) -> int:
+    query = select(func.count()).select_from(UserRecommendationSet)
+    if status is not None:
+        query = query.where(UserRecommendationSet.status == status)
+    return (await session.execute(query)).scalar_one()
 
 
 def _recommendation(title: str, year: int, reason: str = "You will like it.") -> dict:
@@ -567,22 +646,19 @@ class TestWhenTheModelDisappoints:
 class TestIsolationAndGivingUp:
     @respx.mock
     async def test_one_users_failure_does_not_cost_the_others_their_week(
-        self, session, user, make_user, catalog, provider
+        self, session, user, make_user, catalog, concurrency
     ):
         """Five users must not lose recommendations because the first hit a 429
-        (§10.1). The exit code is still 1 — one failure is 20-33% of the user
-        base at this scale."""
+        (§10.1), and overlapping their turns changes nothing about that. The
+        exit code is still 1 — one failure of two is far more than a fifth."""
+        concurrency(3)
+        session.add(Show(id=MARKER, name="Marker Show", status="Ended"))
+        await session.flush()
+        session.add(UserShowWatch(user_id=user.id, show_id=MARKER))
         second = await make_user(email="second@example.com")
         session.add_all([UserShowWatch(user_id=second.id, show_id=TRACKED + n) for n in range(10)])
         await session.commit()
-        # A 400 rather than a 5xx: `retry.retry_for_status` walks its curve on a
-        # 5xx, so a transient status would consume an unpredictable number of
-        # mocked responses and make the assertion about the *second* user's
-        # answer depend on the retry policy rather than on the isolation.
-        _mock(
-            httpx.Response(400, json={"error": "no such model"}),
-            _answer(_recommendation("Dark", 2017)),
-        )
+        respx.post(COMPLETIONS).mock(side_effect=_marked_fail)
 
         assert await run(_parse_args([])) == 1
 
@@ -591,27 +667,149 @@ class TestIsolationAndGivingUp:
 
     @respx.mock
     async def test_it_abandons_the_rest_after_consecutive_failures(
-        self, session, make_user, catalog, provider
+        self, session, catalog, concurrency
     ):
         """A provider that has failed three users running is not going to serve
-        the fourth, and the calls are what cost money."""
-        accounts = []
-        for n in range(CONSECUTIVE_FAILURE_LIMIT + 1):
-            account = await make_user(email=f"user{n}@example.com")
-            session.add_all(
-                [UserShowWatch(user_id=account.id, show_id=TRACKED + s) for s in range(10)]
-            )
-            accounts.append(account)
-        await session.commit()
-        _mock(*[httpx.Response(400, json={"error": "no such model"})] * (len(accounts) + 1))
+        the fourth, and the calls are what cost money. One at a time, so the
+        count is exact; the test below is the overlapping case."""
+        concurrency(1)
+        accounts = await _accounts(session, CONSECUTIVE_FAILURE_LIMIT + 1)
+        respx.post(COMPLETIONS).mock(return_value=httpx.Response(400, json={"error": "gone"}))
 
         assert await run(_parse_args([])) == 1
 
-        written = (
-            await session.execute(select(func.count()).select_from(UserRecommendationSet))
-        ).scalar_one()
-        assert written == CONSECUTIVE_FAILURE_LIMIT
+        assert await _count_sets(session) == CONSECUTIVE_FAILURE_LIMIT
         assert await _sets(session, accounts[-1].id) == []
+
+    @respx.mock
+    async def test_a_skipped_user_does_not_break_a_run_of_failures(
+        self, session, catalog, concurrency
+    ):
+        """Only an answer from the model says the provider is up. A user below
+        the floor never reached it, so failed, below-floor, failed, failed is
+        three in a row and the fifth user is never tried."""
+        concurrency(1)
+        accounts = await _accounts(session, 5)
+        await session.execute(delete(UserShowWatch).where(UserShowWatch.user_id == accounts[1].id))
+        await session.commit()
+        respx.post(COMPLETIONS).mock(return_value=httpx.Response(400, json={"error": "gone"}))
+
+        result = await run_pass_if_free(get_settings())
+
+        assert result is not None
+        assert result.aborted
+        assert (result.failed, result.insufficient) == (CONSECUTIVE_FAILURE_LIMIT, 1)
+        assert await _sets(session, accounts[-1].id) == []
+
+    @respx.mock
+    async def test_giving_up_lets_the_turns_in_flight_finish_and_starts_no_more(
+        self, session, catalog, concurrency
+    ):
+        """Completion order, with two at a time: the third failure stops any new
+        turn, and the one still in flight finishes — so at most one more failed
+        set than the sequential pass wrote, and never all eight."""
+        concurrency(2)
+        await _accounts(session, 8)
+        respx.post(COMPLETIONS).mock(return_value=httpx.Response(400, json={"error": "gone"}))
+
+        result = await run_pass_if_free(get_settings())
+
+        assert result is not None
+        assert result.aborted
+        failed = await _count_sets(session, SET_STATUS_FAILED)
+        assert CONSECUTIVE_FAILURE_LIMIT <= failed <= CONSECUTIVE_FAILURE_LIMIT + 1
+        assert await _count_sets(session) == failed
+
+
+class TestSeveralUsersAtOnce:
+    """NEU-2546: up to `RECOMMENDATION_CONCURRENCY` turns at once."""
+
+    @respx.mock
+    async def test_no_more_requests_are_in_flight_than_the_bound(
+        self, session, catalog, concurrency
+    ):
+        """A provider that holds every answer until released, so whatever the
+        pass starts stays started: three in flight is the bound reached, and a
+        fourth would be the bound broken."""
+        concurrency(3)
+        accounts = await _accounts(session, 6)
+        in_flight = 0
+        peak = 0
+        reached = asyncio.Event()
+        release = asyncio.Event()
+
+        async def held(request: httpx.Request) -> httpx.Response:
+            nonlocal in_flight, peak
+            in_flight += 1
+            peak = max(peak, in_flight)
+            if in_flight == 3:
+                reached.set()
+            await release.wait()
+            in_flight -= 1
+            return _answer(_recommendation("Dark", 2017))
+
+        respx.post(COMPLETIONS).mock(side_effect=held)
+
+        running = asyncio.create_task(run_pass_if_free(get_settings()))
+        try:
+            await asyncio.wait_for(reached.wait(), timeout=10)
+            # Time for a fourth request to arrive, if anything would send one.
+            await asyncio.sleep(0.2)
+            assert in_flight == 3
+        finally:
+            release.set()
+            result = await running
+
+        assert peak == 3
+        assert result is not None
+        assert result.succeeded == len(accounts)
+        assert await _count_sets(session, SET_STATUS_SUCCEEDED) == len(accounts)
+
+    @respx.mock
+    async def test_a_withdrawn_model_writes_no_set_with_turns_in_flight(
+        self, session, catalog, concurrency
+    ):
+        """Every turn in flight hears the same 404, or is cancelled before it
+        does; none of them is the user's failure (NEU-2542)."""
+        concurrency(3)
+        await _accounts(session, 6)
+        route = TestAModelTheProviderDoesNotServe._withdrawn()
+
+        with pytest.raises(LLMModelNotFound, match=MODEL):
+            await run_pass_if_free(get_settings())
+
+        # Only the turns already in flight can have asked; no later one started.
+        assert 1 <= route.call_count <= 3
+        assert await _count_sets(session) == 0
+
+    @respx.mock
+    @pytest.mark.parametrize(
+        ("marked", "code", "ping"),
+        [
+            pytest.param(frozenset({4}), 0, "up", id="1 of 10 failed"),
+            pytest.param(frozenset({0, 4, 8}), 1, "down", id="3 of 10 failed"),
+        ],
+    )
+    async def test_a_pass_tolerates_failures_up_to_a_fifth_of_its_calls(
+        self, session, catalog, concurrency, monkeypatch, marked, code, ping
+    ):
+        """At 100 users a call that fails one time in a hundred would fail the
+        pass in about 63% of weeks under "exit 1 on any failure". One at a time,
+        and the failing users never adjacent, so this is the fraction deciding
+        and not `CONSECUTIVE_FAILURE_LIMIT`."""
+        concurrency(1)
+        monkeypatch.setenv("HEALTHCHECK_RECOMMENDATIONS_URL", HEALTHCHECK)
+        get_settings.cache_clear()
+        await _accounts(session, 10, marked=marked)
+        respx.post(COMPLETIONS).mock(side_effect=_marked_fail)
+        pinged = respx.get(HEALTHCHECK).mock(return_value=httpx.Response(200))
+
+        assert await run(_parse_args([])) == code
+
+        assert pinged.call_count == 1
+        assert pinged.calls.last.request.url.params["status"] == ping
+        assert await _count_sets(session, SET_STATUS_FAILED) == len(marked)
+        assert await _count_sets(session, SET_STATUS_SUCCEEDED) == 10 - len(marked)
 
 
 class TestAModelTheProviderDoesNotServe:
@@ -645,9 +843,12 @@ class TestAModelTheProviderDoesNotServe:
         )
 
     @respx.mock
-    async def test_it_stops_the_pass_and_blames_no_user(self, session, two_users, provider):
+    async def test_it_stops_the_pass_and_blames_no_user(self, session, two_users, concurrency):
         """The second user would get the same answer, so nothing is asked on
-        their behalf, and neither of them is recorded as having failed."""
+        their behalf, and neither of them is recorded as having failed. One at a
+        time, because "nothing is asked" is a claim about a turn not yet started;
+        `TestSeveralUsersAtOnce` has the overlapping case."""
+        concurrency(1)
         route = self._withdrawn()
 
         with pytest.raises(LLMModelNotFound, match=MODEL):
@@ -696,11 +897,12 @@ class TestAModelTheProviderDoesNotServe:
 
     @respx.mock
     async def test_the_run_reports_it_once_by_name_on_both_channels(
-        self, session, two_users, provider, monkeypatch
+        self, session, two_users, concurrency, monkeypatch
     ):
         """The whole path, from the provider's 404 to the two alerts. "3 failed,
         aborted=True" was what the deadman said for as long as this went on, and
         the error tracker said nothing at all."""
+        concurrency(1)
         monkeypatch.setenv("HEALTHCHECK_RECOMMENDATIONS_URL", HEALTHCHECK)
         get_settings.cache_clear()
         captured: list[BaseException] = []
@@ -794,6 +996,22 @@ class TestHowItRefusesToStart:
         finally:
             get_settings.cache_clear()
 
+        assert await _sets(session, user.id) == []
+
+    @respx.mock
+    async def test_a_bound_over_the_cap_refuses_to_start(self, session, user, concurrency, caplog):
+        """The cap is the connection pool's, so a larger bound is refused rather
+        than clamped: a clamp would run a pass at a bound nobody configured."""
+        concurrency(MAX_CONCURRENCY + 1)
+        route = _mock(_answer(_recommendation("Dark", 2017)))
+
+        assert await run(_parse_args([])) == 1
+        assert f"cap of {MAX_CONCURRENCY}" in caplog.text
+        # And the seam the admin trigger calls refuses on its own.
+        with pytest.raises(ValueError, match=f"cap of {MAX_CONCURRENCY}"):
+            await run_pass_if_free(get_settings())
+
+        assert route.call_count == 0
         assert await _sets(session, user.id) == []
 
 

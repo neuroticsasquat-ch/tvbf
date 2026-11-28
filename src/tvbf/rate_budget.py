@@ -116,9 +116,10 @@ TVMAZE_BUCKET = Bucket(table="catalog.rate_budget", key_column="source", key="tv
 # JSON (NEU-1099). At one call per changed user per week this budget will never
 # bind, and it is registered anyway: this codebase has twice shipped a bare
 # per-process limiter and twice paid for the doubled rate (NEU-955, then
-# ADR-0006), and the pass is specified to grow a bounded semaphore somewhere
-# around 100–200 users (project spec §10). Registering now is what makes that
-# change a number rather than a rewrite.
+# ADR-0006), and the pass was specified to grow a bounded semaphore somewhere
+# around 100–200 users (project spec §10). Registering early is what made that
+# change, NEU-2546's `RECOMMENDATION_CONCURRENCY`, a number rather than a
+# rewrite.
 DEEPINFRA_BUCKET = Bucket(table="catalog.rate_budget", key_column="source", key="deepinfra")
 
 BUCKETS: dict[str, Bucket] = {

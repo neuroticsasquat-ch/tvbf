@@ -15,7 +15,7 @@ from tvbf.catalog.runs import create_run, finalize_run, find_live_run
 from tvbf.config import Settings, get_settings
 from tvbf.db import SessionLocal
 from tvbf.deps import get_session, require_admin
-from tvbf.jobs.weekly_recommendations import run_pass_if_free
+from tvbf.jobs.weekly_recommendations import concurrency_refusal, run_pass_if_free
 from tvbf.telemetry import record_handled_exception
 from tvbf.tmdb.client import TMDBClient
 from tvbf.tmdb.ingest import run_catalog_ingest
@@ -236,10 +236,11 @@ async def trigger_weekly_recommendations(
     than a double spend. Refusing here as well would mean a second liveness
     notion for one job, which is what the missing run table exists to avoid.
 
-    The two refusals are both about the only feedback this endpoint can give.
-    A misconfigured provider or an unknown user id would otherwise be a 202
-    followed by silence in a log nobody is watching, so both are answered
-    synchronously, before the task is spawned.
+    The refusals are all about the only feedback this endpoint can give. A
+    misconfigured provider, a `RECOMMENDATION_CONCURRENCY` over its cap
+    (NEU-2546) or an unknown user id would otherwise be a 202 followed by
+    silence in a log nobody is watching, so each is answered synchronously,
+    before the task is spawned.
     """
     user_id = body.user_id if body is not None else None
     if not settings.recommendation_model or not settings.deepinfra_api_key:
@@ -247,6 +248,9 @@ async def trigger_weekly_recommendations(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="RECOMMENDATION_MODEL and DEEPINFRA_API_KEY must both be set",
         )
+    refusal = concurrency_refusal(settings)
+    if refusal is not None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=refusal)
     if user_id is not None and await user_repo.get_by_id(session, user_id) is None:
         raise HTTPException(status_code=404, detail=f"no user with id {user_id}")
 

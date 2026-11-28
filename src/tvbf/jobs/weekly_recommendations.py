@@ -67,34 +67,64 @@ the same call `jobs/scheduled.run_scheduled_delta` makes for its in-flight guard
   failures (§10.1); 25 titles returning 19 rows is a success with 19 rows, on
   exactly the terms NEU-1043 treats unmatched shows as expected output.
 
-## Exit codes: 0 = every user the pass reached ended in a non-failure
+## Exit codes: 1 = abandoned, or more than a fifth of the calls failed
 
-**1 if any user failed**, which is stricter than most jobs here on purpose: at
-3-5 accounts one failure is 20-33% of the user base, and `llm/client` has
-already walked its backoff curve, so a failure that survives it is worth waking
-up for. `insufficient_history` and `no_matches` are not failures — they are the
-pass working.
+**1 when the pass was abandoned, or when more than a fifth of the users it
+called for failed** (`TOLERATED_FAILURE_FRACTION`, NEU-2546). "Called for" is
+every user who was neither skipped as unchanged nor below the floor, because
+those two cost no call and a week where nothing changed must not dilute one
+where everything broke. The rule used to be 1 on *any* failure, written for 3-5
+accounts where one failure was 20-33% of the user base; at 100 users a call that
+fails one time in a hundred would fail the pass in about 63% of weeks
+(`1 - 0.99^100`), and an alert that fires most weeks is one nobody reads. A
+failed user is not lost by tolerating it: their `failed` set is not a succeeded
+one, so the hash gate does not skip them and next week tries again.
+`insufficient_history` and `no_matches` are not failures — they are the pass
+working.
 
-`CONSECUTIVE_FAILURE_LIMIT` aborts the rest of the pass, on the ingest's
+`CONSECUTIVE_FAILURE_LIMIT` abandons the rest of the pass, on the ingest's
 consecutive-failure precedent: a provider that has failed three users running is
-not going to serve the fourth, and the calls are what cost money.
+not going to serve the fourth, and the calls are what cost money. "Running" is
+**completion order**, since turns overlap — three turns finishing `failed` with
+no other outcome between them stop any new turn from starting, and the turns
+already in flight finish, so an abandoned pass writes at most
+`CONSECUTIVE_FAILURE_LIMIT + RECOMMENDATION_CONCURRENCY - 1` failed sets.
 
 **One provider answer ends the pass at once, and is nobody's failure**
 (NEU-2542): `LLMModelNotFound`, the provider saying it no longer serves
 `RECOMMENDATION_MODEL`. No `failed` set is written, because the cause is the
-deployment's. It leaves `run_pass` as an exception, a new one that carries no
-frame of the user's turn, so `run()` reports it like
+deployment's. No new turn starts and the turns in flight are cancelled, because
+each would get the same 404. It leaves `run_pass` as an exception, a new one
+that carries no frame of the user's turn, so `run()` reports it like
 any crash outside a user's turn: one error-tracker event and one `status=down`
 whose message names it.
 
-## Sequential per user, with a written-down threshold for changing it
+## Several users at once, within a bound
 
-Cost is `users x latency` — 0.6 minutes at 5 users, ~11 at 100 and ~23 at 200
-against NEU-1100's measured 6.87s median. That stops being right somewhere
-around **100-200 users**, and the fix then is a bounded semaphore around the
-call, not a rewrite. Writing the threshold down beats pre-building for it, and
-the shared DeepInfra budget (NEU-1099) is what makes the eventual change safe
-rather than dangerous.
+`RECOMMENDATION_CONCURRENCY` users' turns run at once (default 5), under an
+`asyncio.Semaphore`, still started oldest account first (NEU-2546). This was
+sequential until a full-size call took ~23 s: at that rate 100 regenerating
+users were ~38 minutes and 200 were ~76, one process exposed to every deploy for
+over an hour. The fix this docstring had written down for that day — a bounded
+semaphore around the call, never a second process, which the advisory lock
+refuses by design — is what this is.
+
+**Isolation is unchanged.** Each turn still has its own session, its own commit
+and, when it fails, its own `failed` set on a fresh session, so concurrency
+changes when a turn runs and nothing about what it can cost the others.
+
+**The bound is capped at `MAX_CONCURRENCY`, and a larger setting refuses to
+start.** Each turn holds one pooled connection through its call, the lock holds
+one more, and the database limiter takes at most one at a time on top (its
+acquisitions are serialised in-process). The engine's pool is SQLAlchemy's
+default 5 with 10 overflow, so 10 turns is 12 connections of 15; past it a turn
+would wait for a connection while holding a model call's worth of time. Raising
+the cap means raising the pool first.
+
+The shared DeepInfra budget (NEU-1099) still paces every request: at
+`DEEPINFRA_RATE_LIMIT_REQUESTS` = 5/s against calls that take tens of seconds,
+it binds nothing at this bound, and it is what keeps a larger one from becoming
+a burst.
 """
 
 import argparse
@@ -106,6 +136,7 @@ import time
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from fractions import Fraction
 from typing import Any
 from uuid import UUID
 
@@ -182,13 +213,48 @@ a different constant here rather than reusing this one.
 """
 
 CONSECUTIVE_FAILURE_LIMIT = 3
-"""How many users may fail in a row before the pass gives up on the rest.
+"""How many turns may finish `failed` in a row before the pass gives up on the rest.
+
+"In a row" is completion order, not start order, since NEU-2546 overlapped the
+turns: it is what the pass has *heard* that says the provider is down, and
+three answers in a row saying so is the signal whichever user they were for.
+Only a turn the model answered — `succeeded` or `no_matches` — breaks the run. A
+user skipped as unchanged or below the floor never reached the provider, so it
+says nothing about whether the provider is up; with turns overlapping, those
+fast turns would otherwise finish between two failures and reset the count.
 
 Hardcoded rather than a setting, and that is the decision: a setting implies a
-tuning need that will not materialize at 3-5 users, and every setting is a thing
-to get wrong. Same shape as `INGEST_CONSECUTIVE_FAILURE_THRESHOLD`, one level
-smaller because the unit here is a user rather than a show.
+tuning need that has not materialized, and every setting is a thing to get
+wrong. Same shape as `INGEST_CONSECUTIVE_FAILURE_THRESHOLD`, one level smaller
+because the unit here is a user rather than a show.
 """
+
+MAX_CONCURRENCY = 10
+"""The most users' turns `RECOMMENDATION_CONCURRENCY` may run at once.
+
+Set by the connection pool, not by the provider: 10 turns, the lock and the
+limiter are 12 of the engine's 15 (see the module docstring). A setting above it
+refuses to start rather than being clamped, because a clamp would run a pass at a
+bound nobody configured and say so only in a log line.
+"""
+
+TOLERATED_FAILURE_FRACTION = Fraction(1, 5)
+"""Up to this share of the users a pass called for may fail and it still exits 0.
+
+A fraction rather than a float so "exactly a fifth" is exactly a fifth: 3 of 15
+is tolerated and 4 of 15 is not, with no rounding deciding the edge.
+"""
+
+
+def concurrency_refusal(settings: Settings) -> str | None:
+    """Why `RECOMMENDATION_CONCURRENCY` cannot be run, or `None` when it can."""
+    bound = settings.recommendation_concurrency
+    if 1 <= bound <= MAX_CONCURRENCY:
+        return None
+    return (
+        f"RECOMMENDATION_CONCURRENCY is {bound}; it must be between 1 and the cap "
+        f"of {MAX_CONCURRENCY}"
+    )
 
 
 def estimate_tokens(canonical_json: str) -> int:
@@ -229,14 +295,26 @@ class PassResult:
     aborted: bool = False
 
     @property
+    def called(self) -> int:
+        """The users this pass called the model for, or tried to.
+
+        Every turn that ended in neither of the two outcomes that cost no call:
+        skipped as unchanged, or below the floor. A failed turn counts whether or
+        not its request was sent — one that failed compiling its payload was
+        still a user the pass meant to call for.
+        """
+        return self.succeeded + self.no_matches + self.failed
+
+    @property
     def ok(self) -> bool:
         """Whether the process should exit 0.
 
+        False when the pass was abandoned, or when more than
+        `TOLERATED_FAILURE_FRACTION` of the users it called for failed.
         `insufficient_history` and `no_matches` are not failures — they are the
-        pass working — so only a user whose turn raised, or an abandoned run,
-        makes this false.
+        pass working.
         """
-        return self.failed == 0 and not self.aborted
+        return not self.aborted and self.failed <= TOLERATED_FAILURE_FRACTION * self.called
 
     def record(self, outcome: UserOutcome) -> None:
         """Tally one completed turn.
@@ -285,9 +363,9 @@ async def _advisory_lock() -> AsyncIterator[bool]:
 def _client(settings: Settings, model: str) -> OpenAICompatClient:
     """The provider client this pass calls, on the shared DeepInfra budget.
 
-    Constructed once for the whole pass rather than per user: one `httpx`
-    connection pool and one limiter across the run is what makes "sequential per
-    user" cost `users x latency` and nothing else.
+    Constructed once for the whole pass rather than per user, and shared by
+    every turn in flight: one `httpx` connection pool and one limiter across the
+    run is what keeps overlapping turns on one budget.
     """
     return OpenAICompatClient(
         provider=DEEPINFRA,
@@ -781,7 +859,8 @@ async def _record_failure(user_id: UUID, model: str) -> None:
 
     Its own session because the one that raised is in an unknown state — a
     `SQLAlchemyError` leaves the transaction unusable, and the row recording the
-    failure is the only place a failure becomes visible at 3-5 users. A payload
+    failure is the only place one user's failure is recorded at all once the
+    pass tolerates some (`TOLERATED_FAILURE_FRACTION`). A payload
     is recompiled rather than threaded through: the failure may have happened
     *while* compiling it, and there is no set row without a `compiled_payload`
     and a `payload_hash`.
@@ -811,6 +890,10 @@ async def run_pass(settings: Settings, *, user_id: UUID | None = None) -> PassRe
     and what `POST /admin/recommendations` (NEU-1110) passes through; the
     schedule always calls it with nothing.
 
+    Up to `RECOMMENDATION_CONCURRENCY` turns run at once (NEU-2546). One task per
+    user, each waiting on the semaphore, so they start in the work list's order,
+    oldest account first, as the sequential loop did.
+
     The advisory lock is **not** taken here. `run_pass_if_free` wraps this and is
     what both triggers call, so a caller that already holds the lock — a test
     holding it deliberately, or a future in-process caller — is not deadlocked by
@@ -819,16 +902,38 @@ async def run_pass(settings: Settings, *, user_id: UUID | None = None) -> PassRe
     model = settings.recommendation_model
     if not model:
         raise ValueError("RECOMMENDATION_MODEL is not set — there is no model to call")
+    refusal = concurrency_refusal(settings)
+    if refusal is not None:
+        raise ValueError(refusal)
+    bound = settings.recommendation_concurrency
 
     async with SessionLocal() as db:
         user_ids = [user_id] if user_id is not None else await user_repo.list_ids(db)
 
     result = PassResult()
     consecutive_failures = 0
-    log.info("weekly recommendations pass over %d user(s), model %s", len(user_ids), model)
+    # Set by a turn that is about to end the pass by raising. The task group
+    # cancels every other turn once it hears, but only after the raising turn has
+    # left the semaphore and woken a waiter — which would start a turn the pass
+    # has already decided not to run.
+    ending = False
+    gate = asyncio.Semaphore(bound)
+    log.info(
+        "weekly recommendations pass over %d user(s), model %s, %d at a time",
+        len(user_ids),
+        model,
+        bound,
+    )
 
-    async with _client(settings, model) as client:
-        for candidate in user_ids:
+    async def turn(client: OpenAICompatClient, candidate: UUID) -> None:
+        """One user's turn, isolated: anything but the two pass-ending errors is theirs."""
+        nonlocal consecutive_failures, ending
+        async with gate:
+            if result.aborted or ending:
+                # The pass gave up, or is ending, while this turn waited for a
+                # slot. Turns already past this line finish; this one never
+                # starts.
+                return
             try:
                 async with SessionLocal() as db:
                     outcome = await _generate_for_user(
@@ -840,13 +945,15 @@ async def run_pass(settings: Settings, *, user_id: UUID | None = None) -> PassRe
                 # itself is unusable, so every remaining user would fail the same
                 # way. Raising beats writing `CONSECUTIVE_FAILURE_LIMIT` rows
                 # blaming users for a programming error.
+                ending = True
                 raise
             except LLMModelNotFound as exc:
                 # The same argument one layer out (NEU-2542): the provider has
                 # withdrawn the model, so the next user gets the same 404. Left
                 # to the handler below, this wrote three `failed` rows a run and
-                # a deadman message that only counted them. Raised, `run()`
-                # reports it once, by name, on both channels.
+                # a deadman message that only counted them. Raised, the task
+                # group cancels every other turn, and `run()` reports it once,
+                # by name, on both channels.
                 #
                 # **A new exception, not the one that arrived.** `run()` hands
                 # whatever leaves here to the error tracker, which records the
@@ -855,40 +962,63 @@ async def run_pass(settings: Settings, *, user_id: UUID | None = None) -> PassRe
                 # payload and the request body built from it: a watch history,
                 # copied into the tracker. This one starts here, and `from None`
                 # keeps the tracker from walking back to the original.
+                ending = True
                 raise LLMModelNotFound(str(exc)) from None
             except Exception as exc:
                 # Deliberately every exception, not only `LLMError`. Per-user
                 # isolation is about the *user*, not about which layer failed:
                 # a `SQLAlchemyError` while resolving one account must not cost
-                # the other four their week (§10.1).
+                # the other four their week (§10.1). `CancelledError` is not an
+                # `Exception`, so a turn the task group cancels writes nothing.
                 log.exception("user %s failed: %s", candidate, exc)
                 record_handled_exception(exc)
+                # Counted before the `failed` set is written, not after: the
+                # write awaits, and a turn waiting for a slot must see the pass
+                # has given up before it starts rather than after.
                 result.failed += 1
                 consecutive_failures += 1
-                try:
-                    await _record_failure(candidate, model)
-                except Exception as record_exc:
-                    log.exception("could not record the failed set for user %s", candidate)
-                    record_handled_exception(record_exc)
-                if consecutive_failures >= CONSECUTIVE_FAILURE_LIMIT:
+                if consecutive_failures >= CONSECUTIVE_FAILURE_LIMIT and not result.aborted:
                     log.error(
                         "%d users failed in a row; abandoning the rest of the pass",
                         consecutive_failures,
                     )
                     result.aborted = True
-                    break
-                continue
+                try:
+                    await _record_failure(candidate, model)
+                except Exception as record_exc:
+                    log.exception("could not record the failed set for user %s", candidate)
+                    record_handled_exception(record_exc)
+                return
             result.record(outcome)
-            consecutive_failures = 0
+            if outcome.status in (SET_STATUS_SUCCEEDED, SET_STATUS_NO_MATCHES):
+                # The model answered, so the provider is up: see
+                # `CONSECUTIVE_FAILURE_LIMIT` for why a skip does not count.
+                consecutive_failures = 0
+
+    async with _client(settings, model) as client:
+        try:
+            async with asyncio.TaskGroup() as group:
+                for candidate in user_ids:
+                    group.create_task(turn(client, candidate))
+        except BaseExceptionGroup as raised:
+            # Only the two pass-ending errors leave a turn, and the group has
+            # already cancelled every other turn by the time it gets here. Two
+            # turns in flight can both hear the 404 before that, so the group may
+            # hold one each; they say the same thing and the first is enough.
+            # Unwrapped so callers see the error itself, as they did before the
+            # turns overlapped — `run()`'s message and the tests name it.
+            raise raised.exceptions[0] from None
 
     log.info(
         "pass finished: %d generated, %d skipped as unchanged, %d below the floor, "
-        "%d resolved nothing, %d failed; %d titles resolved to nothing in total%s",
+        "%d resolved nothing, %d failed of %d called for; %d titles resolved to "
+        "nothing in total%s",
         result.succeeded,
         result.skipped,
         result.insufficient,
         result.no_matches,
         result.failed,
+        result.called,
         result.unresolved,
         " (aborted)" if result.aborted else "",
     )
@@ -1054,6 +1184,13 @@ async def run(args: argparse.Namespace) -> int:
         log.error("RECOMMENDATION_MODEL and DEEPINFRA_API_KEY must both be set")
         await ping_down(healthcheck, "RECOMMENDATION_MODEL and DEEPINFRA_API_KEY must both be set")
         return 1
+    refusal = concurrency_refusal(settings)
+    if refusal is not None:
+        # Before the lock for the reason above. `run_pass` refuses too, which is
+        # what covers the admin trigger; this is what turns it into a ping.
+        log.error(refusal)
+        await ping_down(healthcheck, refusal)
+        return 1
 
     try:
         result = await run_pass_if_free(settings, user_id=args.user)
@@ -1078,11 +1215,12 @@ async def run(args: argparse.Namespace) -> int:
         return 0
 
     if not result.ok:
-        # Deliberately not an error-tracker event: users failing is per-item
-        # failure the pass tolerated, and the deadman already reports it.
+        # Deliberately not an error-tracker event: each failed user already sent
+        # one from their turn, and the deadman reports the pass.
         await ping_down(
             healthcheck,
-            f"weekly recommendations pass: {result.failed} failed, aborted={result.aborted}",
+            f"weekly recommendations pass: {result.failed} of {result.called} failed, "
+            f"aborted={result.aborted}",
         )
         return 1
 
