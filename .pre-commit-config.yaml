@@ -11,6 +11,10 @@ minimum_pre_commit_version: "3.5.0"
 # Exceptions:
 # - The test hook runs `task test:unit`, not the whole suite. The integration suite
 #   needs the test databases and is too slow for every commit; CI runs all of it.
+# - test-flows runs the orchestration project's tests (orchestration/, ADR-0016) on
+#   Prefect's own interpreter, and only when something under orchestration/ changed. It
+#   comes after `test`, and hooks run in order, so one test
+#   process at a time still holds.
 # - fe-format checks only the staged files, because the frontend's main has known
 #   prettier drift that this hook must not force a whole-tree reformat over. CI
 #   doesn't run prettier at all.
@@ -24,7 +28,7 @@ repos:
         entry: task lint
         language: system
         pass_filenames: false
-        files: \.py$|^pyproject\.toml$|^uv\.lock$
+        files: \.py$|^pyproject\.toml$|^uv\.lock$|^orchestration/(pyproject\.toml|uv\.lock)$
         exclude: ^frontend/
 
       - id: format
@@ -32,7 +36,7 @@ repos:
         entry: task format:check
         language: system
         pass_filenames: false
-        files: \.py$|^pyproject\.toml$|^uv\.lock$
+        files: \.py$|^pyproject\.toml$|^uv\.lock$|^orchestration/(pyproject\.toml|uv\.lock)$
         exclude: ^frontend/
 
       - id: typecheck
@@ -40,7 +44,7 @@ repos:
         entry: task typecheck
         language: system
         pass_filenames: false
-        files: \.py$|^pyproject\.toml$|^uv\.lock$
+        files: \.py$|^pyproject\.toml$|^uv\.lock$|^orchestration/(pyproject\.toml|uv\.lock)$
         exclude: ^frontend/
 
       - id: test
@@ -48,8 +52,15 @@ repos:
         entry: task test:unit
         language: system
         pass_filenames: false
-        files: \.py$|^pyproject\.toml$|^uv\.lock$
+        files: \.py$|^pyproject\.toml$|^uv\.lock$|^orchestration/(pyproject\.toml|uv\.lock)$
         exclude: ^frontend/
+
+      - id: test-flows
+        name: pytest orchestration (backend container)
+        entry: task test:flows
+        language: system
+        pass_filenames: false
+        files: ^orchestration/
 
       - id: fe-lint
         name: oxlint (frontend container)

@@ -20,6 +20,26 @@ updates:
       minor-and-patch:
         update-types: [minor, patch]
 
+  # Prefect's own environment (orchestration/, ADR-0016). Prefect itself is never bumped
+  # here: a worker must not run a newer Prefect than the shared server, so its pin follows
+  # the tag in ops prefect/Dockerfile, through ops' Upgrade procedure, server first.
+  - package-ecosystem: uv
+    directory: /orchestration
+    target-branch: updates/dependencies
+    schedule:
+      interval: weekly
+      day: saturday
+      time: "09:00"
+      timezone: America/New_York
+    commit-message:
+      prefix: build
+      prefix-development: build
+    ignore:
+      - dependency-name: prefect
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+
   # The frontend (frontend/). The npm ecosystem reads pnpm-lock.yaml.
   - package-ecosystem: npm
     directory: /frontend

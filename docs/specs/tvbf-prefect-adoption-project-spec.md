@@ -180,7 +180,8 @@ docker-compose.worker.yml
 ```
 
 - **The image.** The `base` stage runs a second sync:
-  `UV_PROJECT_ENVIRONMENT=/opt/prefect-venv uv sync --locked --no-cache --project orchestration`.
+  `UV_PROJECT_ENVIRONMENT=/opt/prefect-venv uv sync --locked --no-cache --no-dev --project orchestration`,
+  and the `dev` stage syncs it again with its dev group, so pytest stays out of `prod`.
   `uv` builds that environment on the image's own Python 3.13. The app stays in the system
   Python, so `python` is the app's and Prefect is always called by its full path,
   `/opt/prefect-venv/bin/prefect`. The image also installs `tini`. The `dev` and `prod`

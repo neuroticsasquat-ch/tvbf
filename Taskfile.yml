@@ -121,6 +121,14 @@ tasks:
     cmds:
       - "{{.EXEC}} pytest tests/unit {{.CLI_ARGS}}"
 
+  # Prefect's own interpreter (ADR-0016): /opt/prefect-venv, not the app's system Python.
+  # orchestration/pyproject.toml's pytest config scopes it and puts `flows` on the path;
+  # the root config's testpaths keep `task test` out of orchestration/.
+  test:flows:
+    desc: "Run the orchestration project's tests on Prefect's interpreter (task test:flows [-- -k <name>])"
+    cmds:
+      - "{{.EXEC}} /opt/prefect-venv/bin/python -m pytest orchestration/tests {{.CLI_ARGS}}"
+
   test:integration:
     desc: Run only the integration tests (real test DB)
     cmds:
@@ -143,10 +151,13 @@ tasks:
     cmds:
       - "{{.EXEC}} ruff format --check {{.CLI_ARGS}}"
 
+  # Two passes: the app on its own interpreter (the root config covers src and tests),
+  # then orchestration/ with its own config and Prefect's interpreter (ADR-0016).
   typecheck:
-    desc: Run pyright static type check
+    desc: Run pyright over the app, then over orchestration/
     cmds:
       - "{{.EXEC}} pyright {{.CLI_ARGS}}"
+      - "{{.EXEC}} pyright -p orchestration --pythonpath /opt/prefect-venv/bin/python"
 
   # Through a temporary file, so a failed export leaves the committed one as it
   # was. The module writes the document alone to stdout; logs go to stderr.
@@ -458,6 +469,13 @@ tasks:
     desc: Re-resolve uv.lock after a pyproject.toml edit, then task build
     cmds:
       - "{{.EXEC}} uv lock"
+
+  # orchestration/ is a second uv project, Prefect's (ADR-0016). Its prefect pin follows
+  # the tag in ops prefect/Dockerfile and never leads it.
+  deps:lock:flows:
+    desc: Re-resolve orchestration/uv.lock, Prefect's environment, then task build
+    cmds:
+      - "{{.EXEC}} uv lock --project orchestration"
 
   # Frontend (frontend/), in the tvbf-frontend container (NEU-2235). The lint,
   # typecheck, test and build tasks run the package scripts CI's js job runs.
